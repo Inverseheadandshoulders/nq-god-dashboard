@@ -199,20 +199,53 @@ const App = {
         const bucket = this.gexMode.show0dte ? '0DTE' : 'TOTAL';
 
         try {
-            // Fetch snapshot
+            // Fetch OHLC FIRST for proper price and chart data
+            const ohlcRes = await fetch(`/api/ohlc/${symbol}?days=365`);
+            if (ohlcRes.ok) {
+                const ohlcData = await ohlcRes.json();
+                this.state.ohlc = ohlcData.data || [];
+
+                // Get the latest price from OHLC
+                if (this.state.ohlc.length >= 1) {
+                    const today = this.state.ohlc[this.state.ohlc.length - 1];
+                    if (today && today.close > 0) {
+                        this.state.price = today.close;
+                    }
+                }
+
+                // Calculate price change from OHLC
+                if (this.state.ohlc.length >= 2) {
+                    const today = this.state.ohlc[this.state.ohlc.length - 1];
+                    const yesterday = this.state.ohlc[this.state.ohlc.length - 2];
+
+                    if (today && yesterday && yesterday.close > 0) {
+                        this.state.prevClose = yesterday.close;
+                        this.state.change = today.close - yesterday.close;
+                        this.state.changePct = (this.state.change / yesterday.close) * 100;
+                    }
+                }
+            }
+
+            // Fetch snapshot for GEX data
             const res = await fetch(`/api/snapshot?symbol=${symbol}&bucket=${bucket}`);
             if (res.ok) {
                 const data = await res.json();
 
-                if (data.meta) {
-                    this.state.price = data.meta.spot || 0;
+                // Use snapshot spot if available and valid
+                if (data.meta && data.meta.spot > 0) {
+                    this.state.price = data.meta.spot;
+                    // Recalculate change with live price
+                    if (this.state.prevClose > 0) {
+                        this.state.change = this.state.price - this.state.prevClose;
+                        this.state.changePct = (this.state.change / this.state.prevClose) * 100;
+                    }
                 }
 
                 if (data.summary) this.state.summary = data.summary;
                 if (data.levels) this.state.levels = data.levels;
                 if (data.contracts) this.state.contracts = data.contracts;
 
-                if (data.profile && data.profile.strikes) {
+                if (data.profile && data.profile.strikes && data.profile.strikes.length > 0) {
                     const strikes = data.profile.strikes;
                     const callGex = data.profile.call_gex || [];
                     const putGex = data.profile.put_gex || [];
@@ -233,31 +266,10 @@ const App = {
                     this.state.strikes = this.state.allStrikes.filter(s =>
                         s.strike >= spot * 0.85 && s.strike <= spot * 1.15
                     );
-                }
-            }
-
-            // Fetch OHLC for proper price change calculation
-            const ohlcRes = await fetch(`/api/ohlc/${symbol}?days=365`);
-            if (ohlcRes.ok) {
-                const ohlcData = await ohlcRes.json();
-                this.state.ohlc = ohlcData.data || [];
-
-                // CALCULATE PRICE CHANGE FROM OHLC DATA
-                if (this.state.ohlc.length >= 2) {
-                    const today = this.state.ohlc[this.state.ohlc.length - 1];
-                    const yesterday = this.state.ohlc[this.state.ohlc.length - 2];
-
-                    if (today && yesterday && yesterday.close > 0) {
-                        this.state.prevClose = yesterday.close;
-                        this.state.change = today.close - yesterday.close;
-                        this.state.changePct = (this.state.change / yesterday.close) * 100;
-
-                        // If we have live price, recalculate from that
-                        if (this.state.price > 0) {
-                            this.state.change = this.state.price - yesterday.close;
-                            this.state.changePct = (this.state.change / yesterday.close) * 100;
-                        }
-                    }
+                } else {
+                    // Generate sample GEX data when API returns empty
+                    this.state.allStrikes = this.generateSampleGexStrikes(this.state.price || 500);
+                    this.state.strikes = this.state.allStrikes;
                 }
             }
 
@@ -2493,36 +2505,74 @@ const App = {
         const container = document.getElementById('sp500Heatmap');
         if (!container) return;
 
-        // Sample sector data
-        var sectors = [
-            { name: 'Technology', change: 1.2, weight: 28 },
-            { name: 'Healthcare', change: -0.5, weight: 13 },
-            { name: 'Financials', change: 0.8, weight: 12 },
-            { name: 'Consumer Disc', change: 1.5, weight: 11 },
-            { name: 'Communication', change: 0.3, weight: 9 },
-            { name: 'Industrials', change: -0.2, weight: 8 },
-            { name: 'Consumer Staples', change: -0.8, weight: 6 },
-            { name: 'Energy', change: 2.1, weight: 5 },
-            { name: 'Utilities', change: -0.3, weight: 3 },
-            { name: 'Real Estate', change: -1.2, weight: 3 },
-            { name: 'Materials', change: 0.6, weight: 2 }
-        ];
+        // Try to fetch real data from API first
+        let sectors = null;
+        let topStocks = [];
 
-        // Sample stocks in each sector
-        var topStocks = [
-            { symbol: 'AAPL', change: 1.5, sector: 'Technology' },
-            { symbol: 'MSFT', change: 0.8, sector: 'Technology' },
-            { symbol: 'NVDA', change: 3.2, sector: 'Technology' },
-            { symbol: 'GOOGL', change: 0.5, sector: 'Communication' },
-            { symbol: 'AMZN', change: 1.2, sector: 'Consumer Disc' },
-            { symbol: 'META', change: 1.8, sector: 'Communication' },
-            { symbol: 'TSLA', change: 2.5, sector: 'Consumer Disc' },
-            { symbol: 'JPM', change: 1.0, sector: 'Financials' },
-            { symbol: 'JNJ', change: -0.3, sector: 'Healthcare' },
-            { symbol: 'UNH', change: -0.8, sector: 'Healthcare' },
-            { symbol: 'XOM', change: 2.8, sector: 'Energy' },
-            { symbol: 'CVX', change: 1.9, sector: 'Energy' }
-        ];
+        try {
+            const res = await fetch('/api/heatmap/sp500');
+            if (res.ok) {
+                const apiData = await res.json();
+                if (apiData.data && apiData.data.length > 0) {
+                    // Transform API data to our format
+                    const sectorWeights = {
+                        'Technology': 28, 'Financial Services': 12, 'Healthcare': 13,
+                        'Consumer Cyclical': 11, 'Communication': 9, 'Industrials': 8,
+                        'Consumer Defensive': 6, 'Energy': 5
+                    };
+
+                    sectors = apiData.data.map(s => {
+                        const avgChange = s.stocks.reduce((sum, stock) => sum + (stock.change || 0), 0) / s.stocks.length;
+                        return {
+                            name: s.sector,
+                            change: avgChange,
+                            weight: sectorWeights[s.sector] || 5
+                        };
+                    });
+
+                    // Get top movers from all stocks
+                    apiData.data.forEach(s => {
+                        s.stocks.forEach(stock => {
+                            topStocks.push({ symbol: stock.ticker, change: stock.change, sector: s.sector });
+                        });
+                    });
+                }
+            }
+        } catch (e) {
+            console.log('Heatmap API failed, using sample data');
+        }
+
+        // Fallback to sample data if API failed
+        if (!sectors || sectors.length === 0) {
+            sectors = [
+                { name: 'Technology', change: 1.2, weight: 28 },
+                { name: 'Healthcare', change: -0.5, weight: 13 },
+                { name: 'Financials', change: 0.8, weight: 12 },
+                { name: 'Consumer Disc', change: 1.5, weight: 11 },
+                { name: 'Communication', change: 0.3, weight: 9 },
+                { name: 'Industrials', change: -0.2, weight: 8 },
+                { name: 'Consumer Staples', change: -0.8, weight: 6 },
+                { name: 'Energy', change: 2.1, weight: 5 },
+                { name: 'Utilities', change: -0.3, weight: 3 },
+                { name: 'Real Estate', change: -1.2, weight: 3 },
+                { name: 'Materials', change: 0.6, weight: 2 }
+            ];
+
+            topStocks = [
+                { symbol: 'AAPL', change: 1.5, sector: 'Technology' },
+                { symbol: 'MSFT', change: 0.8, sector: 'Technology' },
+                { symbol: 'NVDA', change: 3.2, sector: 'Technology' },
+                { symbol: 'GOOGL', change: 0.5, sector: 'Communication' },
+                { symbol: 'AMZN', change: 1.2, sector: 'Consumer Disc' },
+                { symbol: 'META', change: 1.8, sector: 'Communication' },
+                { symbol: 'TSLA', change: 2.5, sector: 'Consumer Disc' },
+                { symbol: 'JPM', change: 1.0, sector: 'Financials' },
+                { symbol: 'JNJ', change: -0.3, sector: 'Healthcare' },
+                { symbol: 'UNH', change: -0.8, sector: 'Healthcare' },
+                { symbol: 'XOM', change: 2.8, sector: 'Energy' },
+                { symbol: 'CVX', change: 1.9, sector: 'Energy' }
+            ];
+        }
 
         var html = '<div class="heatmap-container">' +
             '<div class="heatmap-header">S&P 500 Sector Performance</div>' +
@@ -2628,6 +2678,40 @@ const App = {
         }
         return data;
     },
+
+    // Generate sample GEX data based on spot price (used when API returns empty)
+    generateSampleGexStrikes: function (spot) {
+        const strikes = [];
+        const baseStrike = Math.round(spot / 5) * 5;
+
+        for (var i = -15; i <= 15; i++) {
+            var strike = baseStrike + i * 5;
+            var distFromSpot = Math.abs(strike - spot);
+            var distPct = distFromSpot / spot;
+
+            // Call GEX peaks above spot
+            var callGex = strike > spot ?
+                Math.max(0, 150000000 * Math.exp(-distPct * 12)) :
+                Math.max(0, 40000000 * Math.exp(-distPct * 18));
+
+            // Put GEX peaks below spot  
+            var putGex = strike < spot ?
+                Math.max(0, 120000000 * Math.exp(-distPct * 12)) :
+                Math.max(0, 25000000 * Math.exp(-distPct * 18));
+
+            strikes.push({
+                strike: strike,
+                call_gex: callGex,
+                put_gex: putGex,
+                net_gex: callGex - putGex,
+                call_oi: Math.floor(Math.random() * 60000) + 5000,
+                put_oi: Math.floor(Math.random() * 45000) + 3000
+            });
+        }
+
+        return strikes;
+    },
+
 
     // ==================== CONTRACT LOOKUP ====================
     renderContractLookup: function () {
