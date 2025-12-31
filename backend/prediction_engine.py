@@ -609,6 +609,137 @@ class PredictionEngine:
             }
         
         return stats
+    
+    def auto_train_from_history(self, theta_client, symbols: List[str] = None) -> Dict:
+        """
+        Automatically generate training data from historical OHLC and train models.
+        
+        Args:
+            theta_client: ThetaClient for fetching historical data
+            symbols: List of symbols to train (default: SPY, QQQ, NVDA)
+        
+        Returns:
+            Dict with training results for each symbol
+        """
+        if not ML_AVAILABLE:
+            return {'error': 'sklearn not available', 'status': 'rule_based'}
+        
+        if symbols is None:
+            symbols = ['SPY', 'QQQ', 'NVDA']
+        
+        results = {}
+        
+        for symbol in symbols:
+            print(f"[PredictionEngine] Training model for {symbol}...")
+            
+            try:
+                # Fetch historical data
+                ohlc = theta_client.get_ohlc(symbol, days=365)
+                if not ohlc or len(ohlc) < 100:
+                    results[symbol] = {'error': 'Insufficient historical data', 'samples': len(ohlc) if ohlc else 0}
+                    continue
+                
+                # Generate training samples
+                training_data = self._generate_training_samples(ohlc)
+                
+                if len(training_data) < 100:
+                    results[symbol] = {'error': 'Insufficient training samples', 'samples': len(training_data)}
+                    continue
+                
+                # Train model
+                result = self.train_model(symbol, training_data)
+                results[symbol] = result
+                
+            except Exception as e:
+                print(f"[PredictionEngine] Error training {symbol}: {e}")
+                results[symbol] = {'error': str(e)}
+        
+        return results
+    
+    def _generate_training_samples(self, ohlc: List[Dict]) -> List[Dict]:
+        """
+        Generate training samples from historical OHLC data.
+        Each sample uses past data to predict next-day direction.
+        """
+        samples = []
+        
+        # Need at least 30 days of lookback + 1 day forward
+        if len(ohlc) < 31:
+            return samples
+        
+        for i in range(30, len(ohlc) - 1):
+            # Get past 30 days for feature calculation
+            past_data = ohlc[i-30:i]
+            current = ohlc[i]
+            next_day = ohlc[i + 1]
+            
+            # Extract closes for technical calculations
+            closes = [d.get('close', 0) for d in past_data]
+            volumes = [d.get('volume', 0) for d in past_data]
+            
+            # Calculate features
+            features = {}
+            
+            # GEX placeholder (estimate from volume patterns)
+            avg_vol = sum(volumes[:-5]) / max(len(volumes) - 5, 1)
+            recent_vol = sum(volumes[-5:]) / 5
+            features['gex_normalized'] = (recent_vol - avg_vol) / max(avg_vol, 1)
+            
+            # Price relative features
+            features['price_vs_call_wall'] = 0  # Placeholder
+            features['price_vs_put_wall'] = 0   # Placeholder
+            features['call_put_ratio'] = 1.0    # Placeholder
+            features['dark_pool_bias'] = 0      # Placeholder
+            
+            # Technical features (calculated from historical data)
+            features['rsi_14'] = self._calculate_rsi(closes, 14)
+            features['macd_signal'] = self._calculate_macd_signal(closes)
+            features['volume_ratio'] = volumes[-1] / max(avg_vol, 1)
+            features['iv_percentile'] = 50  # Placeholder
+            
+            # Trend features
+            features['trend_5d'] = (closes[-1] - closes[-5]) / max(closes[-5], 1) * 100
+            features['trend_20d'] = (closes[-1] - closes[-20]) / max(closes[-20], 1) * 100
+            
+            ema20 = self._calculate_ema(closes, 20)
+            features['gap_from_ema20'] = (closes[-1] - ema20) / max(ema20, 1) * 100
+            
+            # VIX placeholder (estimate from volatility)
+            daily_returns = [(closes[j] - closes[j-1]) / max(closes[j-1], 1) for j in range(1, len(closes))]
+            volatility = np.std(daily_returns) * np.sqrt(252) * 100  # Annualized vol
+            features['vix_level'] = min(volatility, 80)
+            
+            # Seasonality (use day of week performance)
+            current_date = current.get('date', '')
+            try:
+                if current_date:
+                    from datetime import datetime as dt
+                    d = dt.fromisoformat(current_date.replace('Z', ''))
+                    features['day_of_week'] = d.weekday()
+                    features['hour_of_day'] = 10  # Assume open
+                else:
+                    features['day_of_week'] = 2
+                    features['hour_of_day'] = 10
+            except:
+                features['day_of_week'] = 2
+                features['hour_of_day'] = 10
+            
+            features['seasonality_score'] = 0
+            
+            # Calculate target (1 if price goes up next day, 0 if down)
+            current_close = current.get('close', 0)
+            next_close = next_day.get('close', 0)
+            target = 1 if next_close > current_close else 0
+            
+            samples.append({
+                'features': features,
+                'target_1h': target,  # Using next day as proxy
+                'target_4h': target,
+                'target_1d': target
+            })
+        
+        print(f"[PredictionEngine] Generated {len(samples)} training samples")
+        return samples
 
 
 # Global instance

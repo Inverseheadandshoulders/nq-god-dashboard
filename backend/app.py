@@ -1001,22 +1001,28 @@ def get_prediction(symbol: str = "SPY") -> Dict[str, Any]:
     # Gather market data for prediction
     market_data = {}
     
-    # Get GEX data
+    # Get GEX data from store
     try:
-        if theta:
-            snap = store.get(f"gex:{symbol}")
-            if snap:
-                market_data['gex'] = snap
-    except:
-        pass
+        snap = store.latest(symbol.upper(), "TOTAL")
+        if snap:
+            market_data['gex'] = snap.get('summary', {})
+            market_data['gex']['spot'] = snap.get('meta', {}).get('spot', 0)
+    except Exception as e:
+        print(f"[Predictions] Error getting GEX: {e}")
     
-    # Get current price
+    # Get current price from ThetaData
     try:
         if theta:
-            quote = theta.get_quote(symbol)
-            market_data['price'] = quote.get('mid', 0)
-    except:
-        market_data['price'] = 590 if symbol == 'SPY' else 520 if symbol == 'QQQ' else 100
+            spot = theta.get_spot(symbol.upper())
+            if spot and spot > 0:
+                market_data['price'] = spot
+    except Exception as e:
+        print(f"[Predictions] Error getting spot: {e}")
+    
+    # Fallback prices if not available
+    if 'price' not in market_data or market_data['price'] <= 0:
+        fallback_prices = {'SPY': 685, 'QQQ': 618, 'NVDA': 140, 'AAPL': 255, 'TSLA': 455}
+        market_data['price'] = fallback_prices.get(symbol.upper(), 100)
     
     # Generate prediction
     prediction = prediction_engine.predict(symbol, market_data)
@@ -1073,6 +1079,26 @@ def get_model_stats() -> Dict[str, Any]:
         "stats": prediction_engine.get_model_stats(),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+
+@app.post("/api/predictions/train", response_class=JSONResponse)
+def train_models(symbols: List[str] = Body(default=["SPY", "QQQ", "NVDA"])) -> Dict[str, Any]:
+    """Train ML models from historical data"""
+    if not prediction_engine:
+        return {"error": "Prediction engine not available"}
+    
+    if not theta:
+        return {"error": "ThetaData not connected - cannot fetch training data"}
+    
+    try:
+        results = prediction_engine.auto_train_from_history(theta, symbols)
+        return {
+            "status": "training_complete",
+            "results": results,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ==================== HISTORICAL DATA ENDPOINTS ====================
