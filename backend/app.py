@@ -559,7 +559,7 @@ def get_live_flow() -> Dict[str, Any]:
                     # Find high OI strikes
                     if oi_data:
                         for item in oi_data[:3]:
-                            strike = item.get("strike", 0) / 1000
+                            strike = item.get("strike", 0)  # ThetaData returns actual strike price
                             oi = item.get("open_interest", 0)
                             right = item.get("right", "C")
                             
@@ -584,7 +584,7 @@ def get_live_flow() -> Dict[str, Any]:
         now = datetime.now()
         for i in range(15):
             sym = random.choice(symbols)
-            spot = {"SPY": 590, "QQQ": 520, "NVDA": 140, "TSLA": 250, "AAPL": 195, "AMD": 140, "MSFT": 430, "META": 610, "AMZN": 230, "GOOGL": 195}[sym]
+            spot = {"SPY": 685, "QQQ": 525, "NVDA": 140, "TSLA": 420, "AAPL": 255, "AMD": 125, "MSFT": 430, "META": 610, "AMZN": 230, "GOOGL": 198}[sym]
             strike = round(spot / 5) * 5 + random.randint(-5, 5) * 5
             
             flows.append({
@@ -1333,7 +1333,19 @@ def get_news(symbols: str = Query(None), limit: int = Query(20)) -> Dict[str, An
         }
     
     symbol_list = symbols.split(',') if symbols else None
-    news = historical_data.get_market_news(symbol_list, limit)
+    raw_news = historical_data.get_market_news(symbol_list, limit)
+    
+    # Transform to frontend format
+    news = []
+    for item in raw_news:
+        news.append({
+            "time": item.get("time", item.get("timestamp", "")[:16]),
+            "title": item.get("headline", ""),
+            "headline": item.get("headline", ""),
+            "source": item.get("source", "Unknown"),
+            "symbol": item.get("symbol", "MARKET"),
+            "sentiment": item.get("sentiment", 0)
+        })
     
     return {
         "news": news,
