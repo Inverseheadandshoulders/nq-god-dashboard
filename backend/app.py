@@ -1085,7 +1085,7 @@ def get_prediction(symbol: str = "SPY") -> Dict[str, Any]:
     
     # Fallback prices if not available
     if 'price' not in market_data or market_data['price'] <= 0:
-        fallback_prices = {'SPY': 685, 'QQQ': 618, 'NVDA': 140, 'AAPL': 255, 'TSLA': 455}
+        fallback_prices = {'SPY': 687, 'QQQ': 618, 'NVDA': 140, 'AAPL': 255, 'TSLA': 455}
         market_data['price'] = fallback_prices.get(symbol.upper(), 100)
     
     # Generate prediction
