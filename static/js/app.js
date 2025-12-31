@@ -1336,7 +1336,7 @@ const App = {
 
     generateSampleFlow: function () {
         const symbols = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA', 'AMD', 'META', 'MSFT', 'AMZN', 'GOOG'];
-        const spotPrices = { 'SPY': 591, 'QQQ': 520, 'NVDA': 140, 'AAPL': 255, 'TSLA': 455, 'AMD': 125, 'META': 620, 'MSFT': 435, 'AMZN': 225, 'GOOG': 195 };
+        const spotPrices = { 'SPY': 685, 'QQQ': 525, 'NVDA': 137, 'AAPL': 255, 'TSLA': 420, 'AMD': 125, 'META': 610, 'MSFT': 430, 'AMZN': 225, 'GOOG': 198 };
         const flows = [];
 
         for (var i = 0; i < 50; i++) {
@@ -1445,7 +1445,7 @@ const App = {
 
     generateGOFData: function (symbol) {
         // Generate realistic data for GeeksOfFinance style
-        const spotPrices = { 'SPX': 5905, 'SPY': 591, 'QQQ': 520, 'IWM': 225, 'NVDA': 140, 'AAPL': 255, 'TSLA': 455 };
+        const spotPrices = { 'SPX': 5900, 'SPY': 685, 'QQQ': 525, 'IWM': 225, 'NVDA': 137, 'AAPL': 255, 'TSLA': 420 };
         const spot = spotPrices[symbol] || 5905;
 
         const strikes = [];
@@ -2245,7 +2245,7 @@ const App = {
 
     generateSampleDarkPool: function () {
         const symbols = ['SPY', 'QQQ', 'AAPL', 'NVDA', 'TSLA', 'AMD', 'META', 'MSFT', 'GOOGL', 'AMZN'];
-        const spotPrices = { 'SPY': 591, 'QQQ': 520, 'AAPL': 255, 'NVDA': 140, 'TSLA': 455, 'AMD': 125, 'META': 620, 'MSFT': 435, 'GOOGL': 195, 'AMZN': 225 };
+        const spotPrices = { 'SPY': 685, 'QQQ': 525, 'AAPL': 255, 'NVDA': 137, 'TSLA': 420, 'AMD': 125, 'META': 610, 'MSFT': 430, 'GOOGL': 198, 'AMZN': 225 };
         const prints = [];
         for (var i = 0; i < 40; i++) {
             var sym = symbols[Math.floor(Math.random() * symbols.length)];
@@ -2951,7 +2951,7 @@ const App = {
 
         const symbol = query.toUpperCase();
         const contracts = [];
-        const spotPrices = { 'SPY': 591, 'SPX': 5905, 'QQQ': 520, 'NVDA': 140, 'AAPL': 255, 'TSLA': 455 };
+        const spotPrices = { 'SPY': 685, 'SPX': 5900, 'QQQ': 525, 'NVDA': 137, 'AAPL': 255, 'TSLA': 420 };
         const basePrice = spotPrices[symbol] || 100;
         const expirations = ['01/31/2025', '02/21/2025', '03/21/2025', '06/20/2025'];
 
@@ -3008,7 +3008,7 @@ const App = {
         const header = document.getElementById('contractHeader');
         if (header) header.textContent = symbol + ' $' + strike + ' ' + cp + ' ' + exp;
 
-        const spotPrices = { 'SPY': 591, 'SPX': 5905, 'QQQ': 520, 'NVDA': 140, 'AAPL': 255, 'TSLA': 455 };
+        const spotPrices = { 'SPY': 685, 'SPX': 5900, 'QQQ': 525, 'NVDA': 137, 'AAPL': 255, 'TSLA': 420 };
         const spot = spotPrices[symbol] || 100;
 
         this.renderContractChart(symbol, strike, cp, spot);
@@ -3191,7 +3191,7 @@ const App = {
 
     generatePredictions: function () {
         const symbols = ['SPY', 'QQQ', 'NVDA'];
-        const spotPrices = { 'SPY': 591, 'QQQ': 520, 'NVDA': 140 };
+        const spotPrices = { 'SPY': 685, 'QQQ': 525, 'NVDA': 137 };
 
         return symbols.map(sym => {
             const spot = spotPrices[sym];

@@ -175,7 +175,7 @@ def _generate_sample_snapshot(symbol: str, bucket: str) -> Dict[str, Any]:
     """Generate sample GEX snapshot data when real data unavailable"""
     import random
     
-    spot_prices = {"SPY": 591, "QQQ": 520, "SPX": 5905, "IWM": 225, "NVDA": 140, "AAPL": 255, "TSLA": 455}
+    spot_prices = {"SPY": 685, "QQQ": 525, "SPX": 5900, "IWM": 225, "NVDA": 137, "AAPL": 255, "TSLA": 420}
     spot = spot_prices.get(symbol, 500)
     
     base_strike = round(spot / 5) * 5
@@ -1286,7 +1286,7 @@ def _generate_sample_dark_pool(symbol: str, count: int) -> Dict[str, Any]:
     """Generate sample dark pool data"""
     import random
     
-    spot = 591 if symbol == 'SPY' else 520 if symbol == 'QQQ' else 140
+    spot = 685 if symbol == 'SPY' else 525 if symbol == 'QQQ' else 137
     prints = []
     
     for i in range(count):
