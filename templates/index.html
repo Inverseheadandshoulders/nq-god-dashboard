@@ -13,6 +13,67 @@
 </head>
 
 <body>
+    <!-- Verification Gate Modal -->
+    <div id="verificationModal" class="verification-modal" style="display: none;">
+        <div class="verification-overlay"></div>
+        <div class="verification-content">
+            <div class="verification-header">
+                <div class="verification-logo">NQ<span>GOD</span></div>
+                <h2>Access Verification Required</h2>
+                <p>To access the NQ GOD Institutional Terminal, please verify your membership:</p>
+            </div>
+
+            <div class="verification-steps">
+                <!-- Step 1: Discord -->
+                <div class="verification-step" id="discordStep">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Join Our Discord</h3>
+                        <p>Join our community server to get verified</p>
+                        <div class="step-status" id="discordStatus">
+                            <span class="status-pending">⏳ Not Verified</span>
+                        </div>
+                        <a href="/api/verify/discord" class="verify-btn discord-btn" id="discordVerifyBtn">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                <path
+                                    d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+                            </svg>
+                            Verify Discord
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Step 2: YouTube -->
+                <div class="verification-step" id="youtubeStep">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Subscribe on YouTube</h3>
+                        <p>Subscribe to our channel for market updates</p>
+                        <div class="step-status" id="youtubeStatus">
+                            <span class="status-pending">⏳ Not Verified</span>
+                        </div>
+                        <a href="https://www.youtube.com/channel/UCR_htRNBadl0Odpp74YwBoA?sub_confirmation=1"
+                            target="_blank" class="verify-btn youtube-btn" id="youtubeSubBtn">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                <path
+                                    d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                            </svg>
+                            Subscribe
+                        </a>
+                        <button class="verify-btn confirm-btn" id="youtubeConfirmBtn" style="margin-top: 10px;">
+                            ✓ I've Subscribed - Confirm
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="verification-footer">
+                <p id="verificationMessage">Complete both steps to access the terminal</p>
+                <button class="enter-btn" id="enterTerminalBtn" disabled>Enter Terminal</button>
+            </div>
+        </div>
+    </div>
+
     <div class="app">
         <!-- Sidebar -->
         <nav class="sidebar">
@@ -498,86 +559,130 @@
                     </div>
 
                     <!-- Main Layout: Chart | GEX Profile | Customize Panel -->
-                    <div class="gof-main-layout">
+                    <!-- TAB CONTENT: GEX Levels (default) -->
+                    <div class="gof-tab-content active" id="gof-content-levels">
+                        <div class="gof-main-layout">
 
-                        <!-- LEFT: Price Chart with Gamma Zones -->
-                        <div class="gof-chart-section">
-                            <div id="gofPriceChart" class="gof-price-chart"></div>
-                        </div>
-
-                        <!-- CENTER: Dual GEX Profile (Butterfly) -->
-                        <div class="gof-profile-section">
-                            <div id="gofGexProfile" class="gof-gex-profile"></div>
-                        </div>
-
-                        <!-- RIGHT: Customize Chart Panel -->
-                        <div class="gof-customize-panel">
-                            <div class="customize-header">
-                                <span>Watchlist</span>
-                                <button class="watchlist-btn">+</button>
+                            <!-- LEFT: Price Chart with Gamma Zones -->
+                            <div class="gof-chart-section">
+                                <div id="gofPriceChart" class="gof-price-chart"></div>
                             </div>
-                            <div class="customize-tabs">
-                                <span class="tab active">Ticker</span>
-                                <span class="tab">Last</span>
-                                <span class="tab">Change Change %</span>
+
+                            <!-- CENTER: Dual GEX Profile (Butterfly) -->
+                            <div class="gof-profile-section">
+                                <div id="gofGexProfile" class="gof-gex-profile"></div>
                             </div>
-                            <div class="customize-title">Customize Chart</div>
-                            <div class="customize-toggles">
-                                <div class="toggle-row">
-                                    <span>GEX Clusters/Levels</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togClusters" checked><span
-                                            class="slider"></span></label>
-                                    <span class="toggle-label-right">Clusters</span>
-                                </div>
-                                <div class="toggle-row">
-                                    <span>Absolute GEX</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togAbsoluteGex"
-                                            checked><span class="slider"></span></label>
-                                </div>
-                                <div class="toggle-row">
-                                    <span>Volume Switch</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togVolume" checked><span
-                                            class="slider"></span></label>
-                                </div>
-                                <div class="toggle-row">
+
+                            <!-- RIGHT: Customize Chart Panel -->
+                            <div class="gof-customize-panel">
+                                <div class="customize-header">
                                     <span>Watchlist</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togWatchlist" checked><span
-                                            class="slider"></span></label>
+                                    <button class="watchlist-btn">+</button>
                                 </div>
-                                <div class="toggle-row">
-                                    <span>Technicals</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togTechnicals" checked><span
-                                            class="slider"></span></label>
+                                <div class="customize-tabs">
+                                    <span class="tab active">Ticker</span>
+                                    <span class="tab">Last</span>
+                                    <span class="tab">Change Change %</span>
                                 </div>
-                                <div class="toggle-row">
-                                    <span>Dealer Cluster</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togDealerCluster"
-                                            checked><span class="slider"></span></label>
-                                </div>
-                                <div class="toggle-row">
-                                    <span>Algorithms</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togAlgorithms"><span
-                                            class="slider"></span></label>
-                                </div>
-                                <div class="toggle-row">
-                                    <span>Timeframe</span>
-                                    <select id="gofBucketSelect" class="gof-bucket-select">
-                                        <option value="TOTAL">Total</option>
-                                        <option value="0DTE">0 DTE</option>
-                                        <option value="WEEKLY">Weekly</option>
-                                    </select>
-                                </div>
-                                <div class="toggle-row">
-                                    <span>Gross/Net GEX</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togGrossNet" checked><span
-                                            class="slider"></span></label>
-                                </div>
-                                <div class="toggle-row">
-                                    <span>Time Machine</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togTimeMachine"><span
-                                            class="slider"></span></label>
+                                <div class="customize-title">Customize Chart</div>
+                                <div class="customize-toggles">
+                                    <div class="toggle-row">
+                                        <span>GEX Clusters/Levels</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togClusters"
+                                                checked><span class="slider"></span></label>
+                                        <span class="toggle-label-right">Clusters</span>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Absolute GEX</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togAbsoluteGex"
+                                                checked><span class="slider"></span></label>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Volume Switch</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togVolume" checked><span
+                                                class="slider"></span></label>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Watchlist</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togWatchlist"
+                                                checked><span class="slider"></span></label>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Technicals</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togTechnicals"
+                                                checked><span class="slider"></span></label>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Dealer Cluster</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togDealerCluster"
+                                                checked><span class="slider"></span></label>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Algorithms</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togAlgorithms"><span
+                                                class="slider"></span></label>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Timeframe</span>
+                                        <select id="gofBucketSelect" class="gof-bucket-select">
+                                            <option value="TOTAL">Total</option>
+                                            <option value="0DTE">0 DTE</option>
+                                            <option value="WEEKLY">Weekly</option>
+                                        </select>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Gross/Net GEX</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togGrossNet"
+                                                checked><span class="slider"></span></label>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <span>Time Machine</span>
+                                        <label class="toggle-switch"><input type="checkbox" id="togTimeMachine"><span
+                                                class="slider"></span></label>
+                                    </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB CONTENT: Flow/Historical -->
+                    <div class="gof-tab-content" id="gof-content-flow">
+                        <div class="gof-flow-layout">
+                            <div class="gof-flow-chart">
+                                <div class="flow-chart-header">0DTE GEX Flow</div>
+                                <div id="gofFlowChart" style="height: 300px;"></div>
+                            </div>
+                            <div class="gof-historical-chart">
+                                <div class="flow-chart-header">Historical GEX</div>
+                                <div id="gofHistoricalChart" style="height: 300px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB CONTENT: Data Graph -->
+                    <div class="gof-tab-content" id="gof-content-data">
+                        <div class="gof-data-layout">
+                            <div class="gof-gauge-row">
+                                <div class="gof-gauge">
+                                    <div class="gauge-title">GEX Intensity</div>
+                                    <div id="gofIntensityGauge" style="height: 200px;"></div>
+                                </div>
+                                <div class="gof-gauge">
+                                    <div class="gauge-title">GEX Weighted Volatility</div>
+                                    <div id="gofVolatilityGauge" style="height: 200px;"></div>
+                                </div>
+                            </div>
+                            <div class="gof-strike-distribution">
+                                <div class="dist-title">Strike Distribution</div>
+                                <div id="gofStrikeDistribution" style="height: 300px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB CONTENT: 3D Surface Model -->
+                    <div class="gof-tab-content" id="gof-content-surface">
+                        <div class="gof-surface-container">
+                            <div id="gof3DSurface" style="height: 550px;"></div>
                         </div>
                     </div>
 

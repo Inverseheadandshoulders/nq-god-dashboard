@@ -53,6 +53,13 @@ const App = {
     init: async function () {
         console.log('NQ GOD v2 Initializing...');
 
+        // Check verification status first
+        const verified = await this.checkVerification();
+        if (!verified) {
+            this.showVerificationModal();
+            return; // Don't initialize until verified
+        }
+
         this.setupNavigation();
         this.setupTickerInput();
         this.setupGexToggles();
@@ -63,6 +70,152 @@ const App = {
 
         console.log('NQ GOD v2 Ready');
     },
+
+    // ==================== VERIFICATION SYSTEM ====================
+
+    checkVerification: async function () {
+        try {
+            const res = await fetch('/api/verify/status');
+            const data = await res.json();
+
+            if (data.verified) {
+                console.log('[Verification] User verified as:', data.discord_username);
+                return true;
+            }
+
+            // Check URL params for verification callbacks
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('discord_verified') === 'true') {
+                console.log('[Verification] Discord just verified');
+                // Re-check status
+                const res2 = await fetch('/api/verify/status');
+                const data2 = await res2.json();
+                if (data2.verified) {
+                    window.history.replaceState({}, '', '/');
+                    return true;
+                }
+            }
+
+            if (params.get('verify_error')) {
+                console.error('[Verification] Error:', params.get('verify_error'));
+            }
+
+            return false;
+        } catch (e) {
+            console.error('[Verification] Check failed:', e);
+            // If verification system is down, allow access
+            return true;
+        }
+    },
+
+    showVerificationModal: function () {
+        const modal = document.getElementById('verificationModal');
+        if (!modal) return;
+
+        modal.style.display = 'flex';
+
+        // Start a session
+        fetch('/api/verify/start', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                console.log('[Verification] Session started:', data.session_id);
+                this.updateVerificationUI();
+            });
+
+        // Setup event listeners
+        this.setupVerificationEvents();
+    },
+
+    setupVerificationEvents: function () {
+        const youtubeConfirmBtn = document.getElementById('youtubeConfirmBtn');
+        const enterBtn = document.getElementById('enterTerminalBtn');
+
+        if (youtubeConfirmBtn) {
+            youtubeConfirmBtn.addEventListener('click', async () => {
+                youtubeConfirmBtn.disabled = true;
+                youtubeConfirmBtn.textContent = 'Verifying...';
+
+                try {
+                    const res = await fetch('/api/verify/youtube/confirm', { method: 'POST' });
+                    const data = await res.json();
+
+                    if (data.success) {
+                        this.updateVerificationUI();
+                    } else {
+                        youtubeConfirmBtn.textContent = 'Try Again';
+                        youtubeConfirmBtn.disabled = false;
+                    }
+                } catch (e) {
+                    youtubeConfirmBtn.textContent = 'Try Again';
+                    youtubeConfirmBtn.disabled = false;
+                }
+            });
+        }
+
+        if (enterBtn) {
+            enterBtn.addEventListener('click', () => {
+                document.getElementById('verificationModal').style.display = 'none';
+                this.continueInit();
+            });
+        }
+
+        // Check status periodically (for Discord OAuth callback)
+        setInterval(() => this.updateVerificationUI(), 2000);
+    },
+
+    updateVerificationUI: async function () {
+        try {
+            const res = await fetch('/api/verify/status');
+            const data = await res.json();
+
+            const discordStep = document.getElementById('discordStep');
+            const youtubeStep = document.getElementById('youtubeStep');
+            const discordStatus = document.getElementById('discordStatus');
+            const youtubeStatus = document.getElementById('youtubeStatus');
+            const discordBtn = document.getElementById('discordVerifyBtn');
+            const enterBtn = document.getElementById('enterTerminalBtn');
+            const message = document.getElementById('verificationMessage');
+
+            if (data.discord_verified) {
+                if (discordStep) discordStep.classList.add('verified');
+                if (discordStatus) discordStatus.innerHTML = '<span class="status-verified">✓ Verified as ' + (data.discord_username || 'Member') + '</span>';
+                if (discordBtn) discordBtn.style.display = 'none';
+            }
+
+            if (data.youtube_verified) {
+                if (youtubeStep) youtubeStep.classList.add('verified');
+                if (youtubeStatus) youtubeStatus.innerHTML = '<span class="status-verified">✓ Subscribed</span>';
+                document.getElementById('youtubeSubBtn').style.display = 'none';
+                document.getElementById('youtubeConfirmBtn').style.display = 'none';
+            }
+
+            if (data.verified) {
+                if (enterBtn) enterBtn.disabled = false;
+                if (message) message.textContent = '🎉 Verification complete! Click below to enter.';
+            } else if (data.discord_verified && !data.youtube_verified) {
+                if (message) message.textContent = 'Great! Now subscribe to YouTube and confirm.';
+            } else if (!data.discord_verified && data.youtube_verified) {
+                if (message) message.textContent = 'Now verify your Discord membership.';
+            }
+
+        } catch (e) {
+            console.error('[Verification] UI update failed:', e);
+        }
+    },
+
+    continueInit: function () {
+        // Continue with normal initialization after verification
+        this.setupNavigation();
+        this.setupTickerInput();
+        this.setupGexToggles();
+        this.startClock();
+        this.checkConnection().then(() => {
+            this.loadSymbolData(this.state.symbol);
+            this.startLiveUpdates();
+        });
+        console.log('NQ GOD v2 Ready');
+    },
+
 
     setupNavigation: function () {
         document.querySelectorAll('.nav-item[data-view]').forEach(item => {
@@ -1848,7 +2001,7 @@ const App = {
             annotations: [
                 // Spot price label
                 {
-                    x: 150, y: spot, text: '^SPX Price ' + spot.toFixed(2), showarrow: false,
+                    x: 150, y: spot, text: (gexData.meta?.symbol || 'SPY') + ' Price ' + spot.toFixed(2), showarrow: false,
                     font: { color: '#000', size: 10 }, bgcolor: '#ffc107', borderpad: 3
                 }
             ],
@@ -1866,6 +2019,277 @@ const App = {
         });
     },
 
+    // ==================== GOF TAB: Flow/Historical ====================
+    renderGOFFlowTab: function () {
+        const spot = this.state.price || 5900;
+        const symbol = document.getElementById('gofSymbolSelect')?.value || 'SPX';
+
+        // Render 0DTE GEX Flow chart
+        this.renderGOFFlowChart(symbol, spot);
+
+        // Render Historical GEX chart  
+        this.renderGOFHistoricalChart(symbol, spot);
+    },
+
+    renderGOFFlowChart: function (symbol, spot) {
+        const container = document.getElementById('gofFlowChart');
+        if (!container) return;
+
+        // Generate sample intraday flow data
+        const times = [];
+        const gexFlow = [];
+        const now = new Date();
+        now.setHours(9, 30, 0, 0);
+
+        let cumGex = 0;
+        for (let i = 0; i < 78; i++) { // 78 half-hour intervals in trading day
+            const t = new Date(now);
+            t.setMinutes(t.getMinutes() + i * 5);
+            times.push(t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+
+            cumGex += (Math.random() - 0.45) * 50000000;
+            gexFlow.push(cumGex);
+        }
+
+        const trace = {
+            x: times,
+            y: gexFlow.map(g => g / 1e6),
+            type: 'scatter',
+            mode: 'lines',
+            fill: 'tozeroy',
+            fillcolor: gexFlow[gexFlow.length - 1] > 0 ? 'rgba(0, 229, 255, 0.2)' : 'rgba(224, 64, 251, 0.2)',
+            line: { color: gexFlow[gexFlow.length - 1] > 0 ? '#00e5ff' : '#e040fb', width: 2 },
+            name: '0DTE GEX Flow'
+        };
+
+        const layout = {
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: '#0d1117',
+            margin: { l: 50, r: 20, t: 20, b: 40 },
+            xaxis: { gridcolor: 'rgba(255,255,255,0.05)', tickfont: { color: '#a0a0b0', size: 10 } },
+            yaxis: { gridcolor: 'rgba(255,255,255,0.05)', tickfont: { color: '#a0a0b0', size: 10 }, title: 'GEX (M)' },
+            showlegend: false
+        };
+
+        Plotly.newPlot(container, [trace], layout, { responsive: true, displayModeBar: false });
+    },
+
+    renderGOFHistoricalChart: function (symbol, spot) {
+        const container = document.getElementById('gofHistoricalChart');
+        if (!container) return;
+
+        // Generate sample historical GEX data
+        const dates = [];
+        const netGex = [];
+        const now = new Date();
+
+        for (let i = 30; i >= 0; i--) {
+            const d = new Date(now);
+            d.setDate(d.getDate() - i);
+            dates.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+            netGex.push((Math.random() - 0.5) * 2000000000);
+        }
+
+        const trace = {
+            x: dates,
+            y: netGex.map(g => g / 1e9),
+            type: 'bar',
+            marker: { color: netGex.map(g => g > 0 ? '#00e5ff' : '#e040fb') },
+            name: 'Historical Net GEX'
+        };
+
+        const layout = {
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: '#0d1117',
+            margin: { l: 50, r: 20, t: 20, b: 60 },
+            xaxis: { gridcolor: 'rgba(255,255,255,0.05)', tickfont: { color: '#a0a0b0', size: 9 }, tickangle: -45 },
+            yaxis: { gridcolor: 'rgba(255,255,255,0.05)', tickfont: { color: '#a0a0b0', size: 10 }, title: 'Net GEX (B)' },
+            showlegend: false
+        };
+
+        Plotly.newPlot(container, [trace], layout, { responsive: true, displayModeBar: false });
+    },
+
+    // ==================== GOF TAB: Data Graph ====================
+    renderGOFDataTab: function () {
+        const symbol = document.getElementById('gofSymbolSelect')?.value || 'SPX';
+
+        this.renderGOFIntensityGauge();
+        this.renderGOFVolatilityGauge();
+        this.renderGOFStrikeDistribution(symbol);
+    },
+
+    renderGOFIntensityGauge: function () {
+        const container = document.getElementById('gofIntensityGauge');
+        if (!container) return;
+
+        const intensity = Math.random() * 100;
+
+        const trace = {
+            type: 'indicator',
+            mode: 'gauge+number',
+            value: intensity,
+            gauge: {
+                axis: { range: [0, 100], tickcolor: '#a0a0b0' },
+                bar: { color: intensity > 50 ? '#00e5ff' : '#e040fb' },
+                bgcolor: '#1a1a2e',
+                bordercolor: '#2a2a4a',
+                steps: [
+                    { range: [0, 33], color: 'rgba(239, 83, 80, 0.3)' },
+                    { range: [33, 66], color: 'rgba(255, 193, 7, 0.3)' },
+                    { range: [66, 100], color: 'rgba(0, 229, 255, 0.3)' }
+                ]
+            },
+            number: { font: { color: '#fff', size: 24 }, suffix: '%' }
+        };
+
+        const layout = {
+            paper_bgcolor: 'transparent',
+            font: { color: '#a0a0b0' },
+            margin: { t: 20, b: 20, l: 30, r: 30 }
+        };
+
+        Plotly.newPlot(container, [trace], layout, { responsive: true, displayModeBar: false });
+    },
+
+    renderGOFVolatilityGauge: function () {
+        const container = document.getElementById('gofVolatilityGauge');
+        if (!container) return;
+
+        const volatility = 15 + Math.random() * 30;
+
+        const trace = {
+            type: 'indicator',
+            mode: 'gauge+number',
+            value: volatility,
+            gauge: {
+                axis: { range: [0, 50], tickcolor: '#a0a0b0' },
+                bar: { color: volatility > 25 ? '#ef5350' : '#26a69a' },
+                bgcolor: '#1a1a2e',
+                bordercolor: '#2a2a4a',
+                steps: [
+                    { range: [0, 15], color: 'rgba(38, 166, 154, 0.3)' },
+                    { range: [15, 30], color: 'rgba(255, 193, 7, 0.3)' },
+                    { range: [30, 50], color: 'rgba(239, 83, 80, 0.3)' }
+                ]
+            },
+            number: { font: { color: '#fff', size: 24 }, suffix: '%' }
+        };
+
+        const layout = {
+            paper_bgcolor: 'transparent',
+            font: { color: '#a0a0b0' },
+            margin: { t: 20, b: 20, l: 30, r: 30 }
+        };
+
+        Plotly.newPlot(container, [trace], layout, { responsive: true, displayModeBar: false });
+    },
+
+    renderGOFStrikeDistribution: function (symbol) {
+        const container = document.getElementById('gofStrikeDistribution');
+        if (!container) return;
+
+        const gexData = this.generateGOFData(symbol);
+        const strikes = gexData.strikes || [];
+        const spot = gexData.meta.spot;
+
+        const filtered = strikes.filter(s => s.strike >= spot - 100 && s.strike <= spot + 100);
+
+        const traces = [
+            {
+                x: filtered.map(s => s.strike),
+                y: filtered.map(s => s.call_gex / 1e6),
+                type: 'bar',
+                name: 'Call GEX',
+                marker: { color: '#00e5ff' }
+            },
+            {
+                x: filtered.map(s => s.strike),
+                y: filtered.map(s => -s.put_gex / 1e6),
+                type: 'bar',
+                name: 'Put GEX',
+                marker: { color: '#e040fb' }
+            }
+        ];
+
+        const layout = {
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: '#0d1117',
+            margin: { l: 50, r: 20, t: 20, b: 40 },
+            xaxis: { gridcolor: 'rgba(255,255,255,0.05)', tickfont: { color: '#a0a0b0', size: 10 }, title: 'Strike' },
+            yaxis: { gridcolor: 'rgba(255,255,255,0.05)', tickfont: { color: '#a0a0b0', size: 10 }, title: 'GEX (M)' },
+            barmode: 'relative',
+            showlegend: true,
+            legend: { orientation: 'h', y: 1.1, font: { color: '#a0a0b0', size: 10 } }
+        };
+
+        Plotly.newPlot(container, traces, layout, { responsive: true, displayModeBar: false });
+    },
+
+    // ==================== GOF TAB: 3D Surface Model ====================
+    renderGOF3DSurface: function () {
+        const container = document.getElementById('gof3DSurface');
+        if (!container) return;
+
+        const symbol = document.getElementById('gofSymbolSelect')?.value || 'SPX';
+        const gexData = this.generateGOFData(symbol);
+        const spot = gexData.meta.spot;
+
+        // Generate 3D surface data: Strike vs Expiration vs GEX
+        const strikes = [];
+        const expirations = ['0DTE', '1DTE', '2DTE', 'Weekly', '2W', 'Monthly'];
+        const zData = [];
+
+        // Generate strikes
+        for (let i = -10; i <= 10; i++) {
+            strikes.push(Math.round(spot / 25) * 25 + i * 25);
+        }
+
+        // Generate GEX surface
+        for (let exp = 0; exp < expirations.length; exp++) {
+            const row = [];
+            for (let s = 0; s < strikes.length; s++) {
+                const strike = strikes[s];
+                const distFromSpot = Math.abs(strike - spot) / spot;
+                const expDecay = Math.exp(-exp * 0.3);
+                const gex = (200 - distFromSpot * 500) * expDecay * (Math.random() * 0.4 + 0.8);
+                row.push(Math.max(0, gex));
+            }
+            zData.push(row);
+        }
+
+        const trace = {
+            type: 'surface',
+            x: strikes,
+            y: expirations,
+            z: zData,
+            colorscale: [
+                [0, '#1a1a2e'],
+                [0.25, '#e040fb'],
+                [0.5, '#9c27b0'],
+                [0.75, '#00e5ff'],
+                [1, '#26a69a']
+            ],
+            contours: {
+                z: { show: true, usecolormap: true, highlightcolor: '#fff', project: { z: true } }
+            }
+        };
+
+        const layout = {
+            paper_bgcolor: 'transparent',
+            font: { color: '#a0a0b0' },
+            margin: { l: 0, r: 0, t: 40, b: 0 },
+            scene: {
+                xaxis: { title: 'Strike', gridcolor: '#2a2a4a', backgroundcolor: '#0d1117' },
+                yaxis: { title: 'Expiration', gridcolor: '#2a2a4a', backgroundcolor: '#0d1117' },
+                zaxis: { title: 'Total Gamma', gridcolor: '#2a2a4a', backgroundcolor: '#0d1117' },
+                camera: { eye: { x: 1.5, y: 1.5, z: 0.8 } }
+            },
+            title: { text: symbol + ' Gamma Surface', font: { color: '#fff', size: 16 } }
+        };
+
+        Plotly.newPlot(container, [trace], layout, { responsive: true, displayModeBar: 'hover' });
+    },
 
     generateCandleData: function (spot, days) {
         const candles = [];
@@ -1988,13 +2412,33 @@ const App = {
             });
         }
 
-        // Bottom tabs
+        // Bottom tabs - switch content and render charts
         document.querySelectorAll('.gof-tab').forEach(function (tab) {
             if (!tab._bound) {
                 tab._bound = true;
                 tab.addEventListener('click', function () {
+                    const tabId = this.getAttribute('data-goftab');
+
+                    // Update active tab
                     document.querySelectorAll('.gof-tab').forEach(t => t.classList.remove('active'));
                     this.classList.add('active');
+
+                    // Switch content
+                    document.querySelectorAll('.gof-tab-content').forEach(c => c.classList.remove('active'));
+                    const contentId = 'gof-content-' + tabId;
+                    const content = document.getElementById(contentId);
+                    if (content) {
+                        content.classList.add('active');
+
+                        // Render the appropriate content
+                        if (tabId === 'flow') {
+                            self.renderGOFFlowTab();
+                        } else if (tabId === 'data') {
+                            self.renderGOFDataTab();
+                        } else if (tabId === 'surface') {
+                            self.renderGOF3DSurface();
+                        }
+                    }
                 });
             }
         });

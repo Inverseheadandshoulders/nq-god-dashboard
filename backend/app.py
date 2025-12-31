@@ -5,9 +5,26 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import Body, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Cookie, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+
+# Import verification system
+try:
+    from verification import (
+        get_or_create_session, save_session, get_discord_oauth_url,
+        exchange_discord_code, get_discord_user, check_user_in_guild,
+        check_guild_membership_via_bot, generate_verification_code,
+        DISCORD_GUILD_ID, YOUTUBE_CHANNEL_ID, pending_verifications
+    )
+    print("[App] Verification system loaded")
+except Exception as e:
+    print(f"Warning: Could not initialize verification system: {e}")
+    # Stub functions for when verification module fails
+    def get_or_create_session(sid=None): return None
+    def save_session(s): pass
+    DISCORD_GUILD_ID = ""
+    YOUTUBE_CHANNEL_ID = ""
 
 from alerts import AlertRuleSettings, compute_alerts, maybe_send_discord
 from gex_compute import ComputeSettings, build_heatmap_or_surface, compute_gex_snapshot
@@ -1440,3 +1457,213 @@ def get_stream_status() -> Dict[str, Any]:
         "reason": "Streaming not configured - ThetaData Terminal required",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+
+# ==================== VERIFICATION SYSTEM ENDPOINTS ====================
+
+@app.get("/api/verify/status", response_class=JSONResponse)
+def get_verification_status(
+    session_id: Optional[str] = Cookie(None, alias="nqgod_session")
+) -> Dict[str, Any]:
+    """Check current verification status"""
+    if not session_id:
+        return {
+            "verified": False,
+            "discord_verified": False,
+            "youtube_verified": False,
+            "session_id": None,
+            "message": "No session found. Please start verification."
+        }
+    
+    session = get_or_create_session(session_id)
+    if session is None:
+        return {"verified": False, "error": "Verification system not initialized"}
+    
+    return {
+        "verified": session.is_fully_verified(),
+        "discord_verified": session.discord_verified,
+        "youtube_verified": session.youtube_verified,
+        "discord_username": session.discord_username,
+        "session_id": session.session_id
+    }
+
+
+@app.post("/api/verify/start", response_class=JSONResponse)
+def start_verification(response: Response) -> Dict[str, Any]:
+    """Start a new verification session"""
+    session = get_or_create_session()
+    if session is None:
+        return {"error": "Verification system not initialized"}
+    
+    save_session(session)
+    
+    # Set session cookie
+    response.set_cookie(
+        key="nqgod_session",
+        value=session.session_id,
+        httponly=True,
+        max_age=60*60*24*30,  # 30 days
+        samesite="lax"
+    )
+    
+    return {
+        "session_id": session.session_id,
+        "discord_oauth_url": get_discord_oauth_url(session.session_id) if DISCORD_GUILD_ID else None,
+        "youtube_channel_id": YOUTUBE_CHANNEL_ID,
+        "message": "Verification session started"
+    }
+
+
+@app.get("/api/verify/discord", response_class=RedirectResponse)
+def start_discord_verification(
+    session_id: Optional[str] = Cookie(None, alias="nqgod_session")
+):
+    """Redirect to Discord OAuth"""
+    if not session_id:
+        return RedirectResponse("/?error=no_session")
+    
+    if not DISCORD_GUILD_ID:
+        return RedirectResponse("/?error=discord_not_configured")
+    
+    oauth_url = get_discord_oauth_url(session_id)
+    return RedirectResponse(oauth_url)
+
+
+@app.get("/api/verify/discord/callback", response_class=RedirectResponse)
+def discord_oauth_callback(
+    code: str = Query(None),
+    state: str = Query(None),
+    error: str = Query(None)
+):
+    """Handle Discord OAuth callback"""
+    if error:
+        return RedirectResponse(f"/?verify_error=discord_{error}")
+    
+    if not code or not state:
+        return RedirectResponse("/?verify_error=missing_params")
+    
+    session_id = state
+    session = get_or_create_session(session_id)
+    
+    if session is None:
+        return RedirectResponse("/?verify_error=session_not_found")
+    
+    # Exchange code for token
+    token_data = exchange_discord_code(code)
+    if not token_data:
+        return RedirectResponse("/?verify_error=token_exchange_failed")
+    
+    access_token = token_data.get("access_token")
+    
+    # Get user info
+    user_info = get_discord_user(access_token)
+    if not user_info:
+        return RedirectResponse("/?verify_error=user_info_failed")
+    
+    discord_user_id = user_info.get("id")
+    discord_username = user_info.get("username")
+    
+    # Check guild membership
+    is_member = check_user_in_guild(access_token, DISCORD_GUILD_ID)
+    
+    # Also try bot-based check (more reliable)
+    if not is_member:
+        is_member = check_guild_membership_via_bot(discord_user_id, DISCORD_GUILD_ID)
+    
+    if is_member:
+        session.discord_verified = True
+        session.discord_user_id = discord_user_id
+        session.discord_username = discord_username
+        
+        if session.is_fully_verified():
+            session.verified_at = datetime.now(timezone.utc)
+        
+        save_session(session)
+        return RedirectResponse("/?discord_verified=true")
+    else:
+        return RedirectResponse("/?verify_error=not_member")
+
+
+@app.post("/api/verify/youtube", response_class=JSONResponse)
+def verify_youtube_subscription(
+    session_id: Optional[str] = Cookie(None, alias="nqgod_session"),
+    verification_code: str = Body(None, embed=True)
+) -> Dict[str, Any]:
+    """Verify YouTube subscription (manual verification)"""
+    if not session_id:
+        raise HTTPException(400, "No session found")
+    
+    session = get_or_create_session(session_id)
+    if session is None:
+        return {"error": "Verification system not initialized"}
+    
+    # For now, accept any verification attempt after Discord is verified
+    # In production, you'd check against a list of codes from YouTube comments
+    if verification_code and session.discord_verified:
+        session.youtube_verified = True
+        session.youtube_channel_name = "Verified Subscriber"
+        
+        if session.is_fully_verified():
+            session.verified_at = datetime.now(timezone.utc)
+        
+        save_session(session)
+        
+        return {
+            "success": True,
+            "verified": session.is_fully_verified(),
+            "message": "YouTube subscription verified!"
+        }
+    
+    return {
+        "success": False,
+        "message": "Please verify Discord first, then enter your verification code"
+    }
+
+
+@app.post("/api/verify/youtube/confirm", response_class=JSONResponse)
+def confirm_youtube_subscription(
+    session_id: Optional[str] = Cookie(None, alias="nqgod_session")
+) -> Dict[str, Any]:
+    """Confirm YouTube subscription (simple confirmation button)"""
+    if not session_id:
+        raise HTTPException(400, "No session found")
+    
+    session = get_or_create_session(session_id)
+    if session is None:
+        return {"error": "Verification system not initialized"}
+    
+    # Mark as verified when user confirms they've subscribed
+    session.youtube_verified = True
+    session.youtube_channel_name = "Subscriber"
+    
+    if session.is_fully_verified():
+        session.verified_at = datetime.now(timezone.utc)
+    
+    save_session(session)
+    
+    return {
+        "success": True,
+        "verified": session.is_fully_verified(),
+        "discord_verified": session.discord_verified,
+        "youtube_verified": session.youtube_verified,
+        "message": "YouTube subscription confirmed!"
+    }
+
+
+@app.get("/api/verify/config", response_class=JSONResponse)
+def get_verification_config() -> Dict[str, Any]:
+    """Get verification configuration (public info only)"""
+    return {
+        "discord_enabled": bool(DISCORD_GUILD_ID),
+        "youtube_enabled": bool(YOUTUBE_CHANNEL_ID),
+        "youtube_channel_id": YOUTUBE_CHANNEL_ID,
+        "discord_guild_id": DISCORD_GUILD_ID[:6] + "..." if DISCORD_GUILD_ID else None,
+        "verification_required": bool(DISCORD_GUILD_ID or YOUTUBE_CHANNEL_ID)
+    }
+
+
+@app.post("/api/verify/reset", response_class=JSONResponse)
+def reset_verification(response: Response) -> Dict[str, Any]:
+    """Reset verification session"""
+    response.delete_cookie("nqgod_session")
+    return {"success": True, "message": "Verification session reset"}
