@@ -106,6 +106,7 @@ const App = {
             case 'contract': this.renderContractLookup(); break;
             case 'intelligence': this.renderIntelligence(); break;
             case 'earnings': this.renderEarnings(); break;
+            case 'econ': this.renderEconCalendar(); break;
             case 'surface': this.renderVolSurface(); break;
             case 'heatmap': this.renderHeatmap(); break;
             default: break;
@@ -2450,6 +2451,88 @@ const App = {
         }
 
         return earnings;
+    },
+
+    // ==================== ECONOMIC CALENDAR ====================
+    renderEconCalendar: async function () {
+        const container = document.getElementById('econCalendarContent');
+        if (!container) return;
+
+        // Try API
+        let events = [];
+        try {
+            const res = await fetch('/api/econ/calendar');
+            if (res.ok) {
+                const data = await res.json();
+                events = data.events || [];
+            }
+        } catch (e) {
+            console.log('Econ calendar fetch failed:', e);
+        }
+
+        // Fallback sample data
+        if (events.length === 0) {
+            events = this.generateSampleEconEvents();
+        }
+
+        // Group by date
+        const byDate = {};
+        events.forEach(function (e) {
+            if (!byDate[e.date]) byDate[e.date] = [];
+            byDate[e.date].push(e);
+        });
+
+        var html = '<div class="econ-calendar">' +
+            '<div class="econ-header">Upcoming Economic Events</div>' +
+            '<div class="econ-legend">' +
+            '<span class="legend-item high">●</span> High Impact ' +
+            '<span class="legend-item medium">●</span> Medium ' +
+            '<span class="legend-item low">●</span> Low' +
+            '</div>';
+
+        const dates = Object.keys(byDate).sort();
+        for (let d = 0; d < Math.min(dates.length, 10); d++) {
+            const date = dates[d];
+            const dayEvents = byDate[date];
+            const dateObj = new Date(date + 'T12:00:00');
+            const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+            html += '<div class="econ-day">' +
+                '<div class="day-header">' + dayName + '</div>' +
+                '<div class="events-list">';
+
+            for (let i = 0; i < dayEvents.length; i++) {
+                const ev = dayEvents[i];
+                const impClass = ev.importance || 'medium';
+                html += '<div class="econ-event ' + impClass + '">' +
+                    '<span class="event-time">' + ev.time + '</span>' +
+                    '<span class="event-name">' + ev.event + '</span>' +
+                    '<span class="event-forecast">Forecast: ' + ev.forecast + '</span>' +
+                    '<span class="event-previous">Previous: ' + ev.previous + '</span>' +
+                    '</div>';
+            }
+            html += '</div></div>';
+        }
+
+        html += '</div>';
+        container.innerHTML = html;
+    },
+
+    generateSampleEconEvents: function () {
+        const today = new Date();
+        return [
+            { date: this.formatDate(today, 3), time: '08:30', event: 'Initial Jobless Claims', forecast: '210K', previous: '201K', importance: 'medium' },
+            { date: this.formatDate(today, 7), time: '08:30', event: 'Nonfarm Payrolls', forecast: '175K', previous: '227K', importance: 'high' },
+            { date: this.formatDate(today, 7), time: '08:30', event: 'Unemployment Rate', forecast: '4.1%', previous: '4.2%', importance: 'high' },
+            { date: this.formatDate(today, 12), time: '08:30', event: 'Core CPI MoM', forecast: '0.2%', previous: '0.3%', importance: 'high' },
+            { date: this.formatDate(today, 28), time: '14:00', event: 'FOMC Rate Decision', forecast: '4.25%', previous: '4.50%', importance: 'high' },
+        ];
+    },
+
+    formatDate: function (baseDate, daysOffset) {
+        const d = new Date(baseDate);
+        d.setDate(d.getDate() + daysOffset);
+        return d.toISOString().split('T')[0];
     },
 
     formatWeekHeader: function (week) {

@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NQ GOD | Institutional Terminal</title>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="/static/css/styles.css">
 </head>
+
 <body>
     <div class="app">
         <!-- Sidebar -->
@@ -83,6 +87,10 @@
                     <span class="nav-icon">$</span>
                     <span>Earnings</span>
                 </a>
+                <a class="nav-item" data-view="econ">
+                    <span class="nav-icon">📅</span>
+                    <span>Economic Calendar</span>
+                </a>
                 <a class="nav-item" data-view="surface">
                     <span class="nav-icon">◇</span>
                     <span>Vol Surface 3D</span>
@@ -107,9 +115,12 @@
                 </div>
                 <div class="topbar-center">
                     <div class="market-mini">
-                        <div class="market-mini-item"><span class="label">SPY</span><span class="value" id="miniSPY">--</span></div>
-                        <div class="market-mini-item"><span class="label">QQQ</span><span class="value" id="miniQQQ">--</span></div>
-                        <div class="market-mini-item"><span class="label">VIX</span><span class="value" id="miniVIX">--</span></div>
+                        <div class="market-mini-item"><span class="label">SPY</span><span class="value"
+                                id="miniSPY">--</span></div>
+                        <div class="market-mini-item"><span class="label">QQQ</span><span class="value"
+                                id="miniQQQ">--</span></div>
+                        <div class="market-mini-item"><span class="label">VIX</span><span class="value"
+                                id="miniVIX">--</span></div>
                     </div>
                 </div>
                 <div class="topbar-right">
@@ -123,7 +134,7 @@
 
             <!-- View Container -->
             <div class="view-container">
-                
+
                 <!-- ==================== DASHBOARD ==================== -->
                 <div class="view active" id="view-dashboard">
                     <div class="gex-controls-bar">
@@ -138,12 +149,15 @@
                             </label>
                         </div>
                         <div class="gex-mode-toggles">
-                            <label class="toggle-item"><input type="checkbox" id="toggleNetGex" checked><span>Net GEX</span></label>
-                            <label class="toggle-item"><input type="checkbox" id="toggleGrossGex"><span>Gross GEX</span></label>
-                            <label class="toggle-item"><input type="checkbox" id="toggleTotalGamma"><span>Total Gamma</span></label>
+                            <label class="toggle-item"><input type="checkbox" id="toggleNetGex" checked><span>Net
+                                    GEX</span></label>
+                            <label class="toggle-item"><input type="checkbox" id="toggleGrossGex"><span>Gross
+                                    GEX</span></label>
+                            <label class="toggle-item"><input type="checkbox" id="toggleTotalGamma"><span>Total
+                                    Gamma</span></label>
                         </div>
                     </div>
-                    
+
                     <div class="ohlc-bar">
                         <span class="ohlc-item">O <span id="ohlcOpen">--</span></span>
                         <span class="ohlc-item">H <span id="ohlcHigh">--</span></span>
@@ -151,7 +165,7 @@
                         <span class="ohlc-item">C <span id="ohlcClose">--</span></span>
                         <span class="ohlc-item">EMA 50 <span id="ohlcEma">--</span></span>
                     </div>
-                    
+
                     <div class="dashboard-main-grid">
                         <div class="chart-panel">
                             <div id="dashChart" style="height: 100%;"></div>
@@ -165,23 +179,33 @@
                             <div id="dashGex" style="height: calc(100% - 30px);"></div>
                         </div>
                     </div>
-                    
+
                     <div class="key-levels-row">
-                        <div class="key-level zero-gamma"><span class="level-label">Zero Gamma</span><span class="level-value" id="lvlZeroGamma">--</span></div>
-                        <div class="key-level max-gamma"><span class="level-label">Max Gamma</span><span class="level-value" id="lvlMaxGamma">--</span></div>
-                        <div class="key-level put-wall"><span class="level-label">Put Wall</span><span class="level-value" id="lvlPutWall">--</span></div>
-                        <div class="key-level call-wall"><span class="level-label">Call Wall</span><span class="level-value" id="lvlCallWall">--</span></div>
-                        <div class="key-level vol-trigger"><span class="level-label">Vol Trigger</span><span class="level-value" id="lvlVolTrigger">--</span></div>
+                        <div class="key-level zero-gamma"><span class="level-label">Zero Gamma</span><span
+                                class="level-value" id="lvlZeroGamma">--</span></div>
+                        <div class="key-level max-gamma"><span class="level-label">Max Gamma</span><span
+                                class="level-value" id="lvlMaxGamma">--</span></div>
+                        <div class="key-level put-wall"><span class="level-label">Put Wall</span><span
+                                class="level-value" id="lvlPutWall">--</span></div>
+                        <div class="key-level call-wall"><span class="level-label">Call Wall</span><span
+                                class="level-value" id="lvlCallWall">--</span></div>
+                        <div class="key-level vol-trigger"><span class="level-label">Vol Trigger</span><span
+                                class="level-value" id="lvlVolTrigger">--</span></div>
                     </div>
-                    
+
                     <div class="stats-row">
-                        <div class="stat-item"><span class="stat-label">Net GEX</span><span class="stat-value" id="statNetGex">--</span></div>
-                        <div class="stat-item"><span class="stat-label">Gross GEX</span><span class="stat-value" id="statGrossGex">--</span></div>
-                        <div class="stat-item"><span class="stat-label">Put/Call OI</span><span class="stat-value" id="statPCR">--</span></div>
-                        <div class="stat-item"><span class="stat-label">IV Rank</span><span class="stat-value" id="statIVR">--</span></div>
-                        <div class="stat-item"><span class="stat-label">Regime</span><span class="stat-value" id="statRegime">--</span></div>
+                        <div class="stat-item"><span class="stat-label">Net GEX</span><span class="stat-value"
+                                id="statNetGex">--</span></div>
+                        <div class="stat-item"><span class="stat-label">Gross GEX</span><span class="stat-value"
+                                id="statGrossGex">--</span></div>
+                        <div class="stat-item"><span class="stat-label">Put/Call OI</span><span class="stat-value"
+                                id="statPCR">--</span></div>
+                        <div class="stat-item"><span class="stat-label">IV Rank</span><span class="stat-value"
+                                id="statIVR">--</span></div>
+                        <div class="stat-item"><span class="stat-label">Regime</span><span class="stat-value"
+                                id="statRegime">--</span></div>
                     </div>
-                    
+
                     <div class="flow-panel">
                         <div class="panel-header">Recent Flow</div>
                         <div id="dashFlow" class="scrollable"></div>
@@ -204,14 +228,14 @@
                                 <button class="ov-tab">Greeks</button>
                             </div>
                         </div>
-                        
+
                         <div class="overview-main-grid">
                             <div class="ov-chart-area">
                                 <div id="ovChart" style="height: 350px;"></div>
                             </div>
                             <div class="ov-stats-sidebar" id="ovStats"></div>
                         </div>
-                        
+
                         <div class="performance-section">
                             <div class="perf-header">
                                 <span class="perf-title">Performance</span>
@@ -225,33 +249,75 @@
                                 <div class="perf-row data" id="ovPerfRow"></div>
                             </div>
                         </div>
-                        
+
                         <div class="contracts-grid">
                             <div class="contracts-panel">
-                                <div class="contracts-header"><span id="ovHighVolTitle">Highest Volume Contracts</span></div>
-                                <table class="contracts-table" id="ovHighVolTable"><thead><tr>
-                                    <th>Chain</th><th>Last</th><th>Low-High</th><th>Volume</th><th>OI</th><th>Bid/Ask</th>
-                                </tr></thead><tbody></tbody></table>
+                                <div class="contracts-header"><span id="ovHighVolTitle">Highest Volume Contracts</span>
+                                </div>
+                                <table class="contracts-table" id="ovHighVolTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Chain</th>
+                                            <th>Last</th>
+                                            <th>Low-High</th>
+                                            <th>Volume</th>
+                                            <th>OI</th>
+                                            <th>Bid/Ask</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
                             <div class="contracts-panel">
                                 <div class="contracts-header"><span id="ovHighOITitle">Highest OI Contracts</span></div>
-                                <table class="contracts-table" id="ovHighOITable"><thead><tr>
-                                    <th>Chain</th><th>Last</th><th>Low-High</th><th>Volume</th><th>OI</th><th>Bid/Ask</th>
-                                </tr></thead><tbody></tbody></table>
+                                <table class="contracts-table" id="ovHighOITable">
+                                    <thead>
+                                        <tr>
+                                            <th>Chain</th>
+                                            <th>Last</th>
+                                            <th>Low-High</th>
+                                            <th>Volume</th>
+                                            <th>OI</th>
+                                            <th>Bid/Ask</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
                         </div>
-                        
+
                         <div class="historical-section">
                             <div class="hist-header"><span id="ovHistTitle">Historical Data</span></div>
                             <div class="hist-table-wrapper">
                                 <table class="historical-table" id="ovHistTable">
-                                    <thead><tr>
-                                        <th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>% Change</th>
-                                        <th>P/C</th><th>Volume</th><th>C Vol</th><th>P Vol</th><th>Vol/30D</th>
-                                        <th>Bear/Bull</th><th>Total OI</th><th>% OI</th><th>C OI</th><th>P OI</th>
-                                        <th>IVR</th><th>Vol 30D</th><th>Imp 30D</th><th>Vol 60D</th><th>Imp 60D</th>
-                                        <th>Net Prem</th><th>Total Prem</th>
-                                    </tr></thead><tbody></tbody>
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Open</th>
+                                            <th>High</th>
+                                            <th>Low</th>
+                                            <th>Close</th>
+                                            <th>% Change</th>
+                                            <th>P/C</th>
+                                            <th>Volume</th>
+                                            <th>C Vol</th>
+                                            <th>P Vol</th>
+                                            <th>Vol/30D</th>
+                                            <th>Bear/Bull</th>
+                                            <th>Total OI</th>
+                                            <th>% OI</th>
+                                            <th>C OI</th>
+                                            <th>P OI</th>
+                                            <th>IVR</th>
+                                            <th>Vol 30D</th>
+                                            <th>Imp 30D</th>
+                                            <th>Vol 60D</th>
+                                            <th>Imp 60D</th>
+                                            <th>Net Prem</th>
+                                            <th>Total Prem</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
                                 </table>
                             </div>
                         </div>
@@ -265,32 +331,32 @@
                             <span id="seasonSymbol">SPY</span>
                             <span class="season-subtitle">Seasonality</span>
                         </div>
-                        
+
                         <div class="season-main-grid">
                             <!-- Heatmap -->
                             <div class="season-panel heatmap-panel">
                                 <div class="panel-title">Monthly Returns Heatmap</div>
                                 <div id="seasonHeatmap"></div>
                             </div>
-                            
+
                             <!-- Distribution by Year -->
                             <div class="season-panel dist-panel">
                                 <div class="panel-title">Distribution of Daily % Changes</div>
                                 <div id="seasonDistribution" style="height: 300px;"></div>
                             </div>
                         </div>
-                        
+
                         <!-- Growth Chart -->
                         <div class="season-panel growth-panel">
                             <div id="seasonGrowthChart" style="height: 300px;"></div>
                         </div>
-                        
+
                         <div class="season-bottom-grid">
                             <!-- Monthly Bars -->
                             <div class="season-panel">
                                 <div id="seasonMonthlyBars" style="height: 250px;"></div>
                             </div>
-                            
+
                             <!-- Daily Distribution -->
                             <div class="season-panel">
                                 <div id="seasonDailyDist" style="height: 250px;"></div>
@@ -312,7 +378,7 @@
                                 </select>
                             </div>
                         </div>
-                        
+
                         <div class="blocks-table-wrapper">
                             <table class="blocks-table">
                                 <thead>
@@ -342,7 +408,7 @@
                                 <div class="flow-stat"><span id="flowSentiment" class="bullish">BULLISH</span></div>
                             </div>
                         </div>
-                        
+
                         <!-- Filter Buttons -->
                         <div class="flow-filters">
                             <button class="filter-btn active" data-filter="all">All</button>
@@ -358,7 +424,7 @@
                             <button class="filter-btn" data-filter="whales">Whales</button>
                             <button class="filter-btn" data-filter="leaps">LEAPS</button>
                         </div>
-                        
+
                         <div class="flow-table-wrapper">
                             <table class="flow-table flow-table-full">
                                 <thead>
@@ -390,13 +456,15 @@
 
                 <!-- ==================== OTHER VIEWS ==================== -->
                 <div class="view" id="view-heatmap">
-                    <div class="view-header"><h2>S&P 500 Heatmap</h2></div>
+                    <div class="view-header">
+                        <h2>S&P 500 Heatmap</h2>
+                    </div>
                     <div id="sp500Heatmap" class="heatmap-content"></div>
                 </div>
-                
+
                 <div class="view" id="view-gex">
                     <!-- GEX Page - GeeksOfFinance Style -->
-                    
+
                     <!-- Top Bar: Ticker + OHLC -->
                     <div class="gof-topbar">
                         <div class="gof-ticker-section">
@@ -428,20 +496,20 @@
                             <span class="ema-price" id="gofEmaValue">6905.61</span>
                         </div>
                     </div>
-                    
+
                     <!-- Main Layout: Chart | GEX Profile | Customize Panel -->
                     <div class="gof-main-layout">
-                        
+
                         <!-- LEFT: Price Chart with Gamma Zones -->
                         <div class="gof-chart-section">
                             <div id="gofPriceChart" class="gof-price-chart"></div>
                         </div>
-                        
+
                         <!-- CENTER: Dual GEX Profile (Butterfly) -->
                         <div class="gof-profile-section">
                             <div id="gofGexProfile" class="gof-gex-profile"></div>
                         </div>
-                        
+
                         <!-- RIGHT: Customize Chart Panel -->
                         <div class="gof-customize-panel">
                             <div class="customize-header">
@@ -457,32 +525,39 @@
                             <div class="customize-toggles">
                                 <div class="toggle-row">
                                     <span>GEX Clusters/Levels</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togClusters" checked><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togClusters" checked><span
+                                            class="slider"></span></label>
                                     <span class="toggle-label-right">Clusters</span>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Absolute GEX</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togAbsoluteGex" checked><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togAbsoluteGex"
+                                            checked><span class="slider"></span></label>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Volume Switch</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togVolume" checked><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togVolume" checked><span
+                                            class="slider"></span></label>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Watchlist</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togWatchlist" checked><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togWatchlist" checked><span
+                                            class="slider"></span></label>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Technicals</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togTechnicals" checked><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togTechnicals" checked><span
+                                            class="slider"></span></label>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Dealer Cluster</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togDealerCluster" checked><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togDealerCluster"
+                                            checked><span class="slider"></span></label>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Algorithms</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togAlgorithms"><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togAlgorithms"><span
+                                            class="slider"></span></label>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Timeframe</span>
@@ -494,23 +569,25 @@
                                 </div>
                                 <div class="toggle-row">
                                     <span>Gross/Net GEX</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togGrossNet" checked><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togGrossNet" checked><span
+                                            class="slider"></span></label>
                                 </div>
                                 <div class="toggle-row">
                                     <span>Time Machine</span>
-                                    <label class="toggle-switch"><input type="checkbox" id="togTimeMachine"><span class="slider"></span></label>
+                                    <label class="toggle-switch"><input type="checkbox" id="togTimeMachine"><span
+                                            class="slider"></span></label>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Time Machine Slider (shows when toggle enabled) -->
                     <div class="gof-time-machine" id="gofTimeMachineContainer" style="display:none;">
                         <span class="tm-label">Time Machine</span>
                         <input type="range" id="gofTimeMachineSlider" min="0" max="390" value="390">
                         <span id="gofTimeMachineValue">LIVE</span>
                     </div>
-                    
+
                     <!-- Bottom Tabs -->
                     <div class="gof-bottom-tabs">
                         <button class="gof-tab active" data-goftab="levels">GEX Levels</button>
@@ -522,26 +599,32 @@
                         <button class="gof-tab" data-goftab="surface">3D Surface Model</button>
                     </div>
                 </div>
-                
+
                 <div class="view" id="view-chain">
-                    <div class="view-header"><h2>Options Chain</h2></div>
+                    <div class="view-header">
+                        <h2>Options Chain</h2>
+                    </div>
                     <div id="chainContent"></div>
                 </div>
-                
+
                 <!-- Contract Lookup View (Unusual Whales Style) -->
                 <div class="view" id="view-contract">
-                    <div class="view-header"><h2>Contract Lookup</h2></div>
+                    <div class="view-header">
+                        <h2>Contract Lookup</h2>
+                    </div>
                     <div class="contract-layout">
                         <div class="contract-search-section">
                             <div class="contract-search-bar">
-                                <input type="text" id="contractSearchInput" placeholder="Search SPY, QQQ, NVDA..." class="contract-input">
+                                <input type="text" id="contractSearchInput" placeholder="Search SPY, QQQ, NVDA..."
+                                    class="contract-input">
                                 <select id="contractExpSelect" class="contract-select">
                                     <option value="2025-01-31">01/31/2025</option>
                                     <option value="2025-02-21">02/21/2025</option>
                                     <option value="2025-03-21">03/21/2025</option>
                                     <option value="2025-06-20">06/20/2025</option>
                                 </select>
-                                <input type="number" id="contractStrikeInput" placeholder="Strike" class="contract-input strike-input">
+                                <input type="number" id="contractStrikeInput" placeholder="Strike"
+                                    class="contract-input strike-input">
                                 <select id="contractTypeSelect" class="contract-select">
                                     <option value="C">Call</option>
                                     <option value="P">Put</option>
@@ -550,14 +633,14 @@
                             </div>
                             <div id="contractAutocomplete" class="contract-autocomplete"></div>
                         </div>
-                        
+
                         <div class="contract-detail" id="contractDetail" style="display:none;">
                             <div class="contract-header" id="contractHeader">SPY $590 C 01/31/2025</div>
-                            
+
                             <div class="contract-charts">
                                 <div id="contractPriceChart" class="contract-chart"></div>
                             </div>
-                            
+
                             <div class="contract-metrics-grid">
                                 <div class="metric-panel">
                                     <div class="metric-title">Probability of Profit</div>
@@ -568,7 +651,8 @@
                                     <div class="metric-details">
                                         <div><span>Full Kelly:</span><strong id="contractFullKelly">--</strong></div>
                                         <div><span>Half Kelly:</span><strong id="contractHalfKelly">--</strong></div>
-                                        <div><span>Quarter Kelly:</span><strong id="contractQuarterKelly">--</strong></div>
+                                        <div><span>Quarter Kelly:</span><strong id="contractQuarterKelly">--</strong>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="metric-panel">
@@ -576,7 +660,8 @@
                                     <div class="metric-details">
                                         <div><span>Delta Ratio:</span><strong id="contractDeltaRatio">--</strong></div>
                                         <div><span>Vol Adjustment:</span><strong id="contractVolAdj">--</strong></div>
-                                        <div><span>Margin Factor:</span><strong id="contractMarginFactor">--</strong></div>
+                                        <div><span>Margin Factor:</span><strong id="contractMarginFactor">--</strong>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="metric-panel">
@@ -587,7 +672,7 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="contract-risk-grid">
                                 <div class="risk-panel">
                                     <div class="risk-title">Risk/Reward Profile</div>
@@ -610,7 +695,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="view" id="view-darkpool">
                     <div class="view-header">
                         <h2>Dark Pool & Order Flow</h2>
@@ -636,7 +721,7 @@
                         <div id="dpClusters" class="dp-clusters"></div>
                     </div>
                 </div>
-                
+
                 <!-- Market Intelligence View -->
                 <div class="view" id="view-intelligence">
                     <div class="view-header">
@@ -656,14 +741,18 @@
                                     <div class="pred-symbol">SPY</div>
                                     <div class="pred-direction bullish">BULLISH</div>
                                     <div class="pred-targets">
-                                        <div class="pred-row"><span>Entry:</span><span id="predEntry">$591.50</span></div>
-                                        <div class="pred-row"><span>Target:</span><span id="predTarget" class="positive">$598.00</span></div>
-                                        <div class="pred-row"><span>Stop:</span><span id="predStop" class="negative">$588.00</span></div>
+                                        <div class="pred-row"><span>Entry:</span><span id="predEntry">$591.50</span>
+                                        </div>
+                                        <div class="pred-row"><span>Target:</span><span id="predTarget"
+                                                class="positive">$598.00</span></div>
+                                        <div class="pred-row"><span>Stop:</span><span id="predStop"
+                                                class="negative">$588.00</span></div>
                                     </div>
                                     <div class="pred-metrics">
                                         <div class="pred-metric"><span>R/R:</span><span>1.85</span></div>
                                         <div class="pred-metric"><span>Win %:</span><span>72%</span></div>
-                                        <div class="pred-metric"><span>EV:</span><span class="positive">+$1.24</span></div>
+                                        <div class="pred-metric"><span>EV:</span><span class="positive">+$1.24</span>
+                                        </div>
                                     </div>
                                     <div class="pred-factors">
                                         <span class="factor positive">GEX Supportive</span>
@@ -673,7 +762,7 @@
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="intel-grid">
                             <div class="intel-panel signals-panel">
                                 <div class="panel-header">Active Signals</div>
@@ -688,7 +777,7 @@
                                 <div id="intelPatterns" class="patterns-list"></div>
                             </div>
                         </div>
-                        
+
                         <!-- Archived Scans -->
                         <div class="archived-scans">
                             <div class="panel-header">Archived Scans</div>
@@ -696,14 +785,25 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="view" id="view-earnings">
-                    <div class="view-header"><h2>Earnings</h2></div>
+                    <div class="view-header">
+                        <h2>Earnings Calendar</h2>
+                    </div>
                     <div id="earningsContent"></div>
                 </div>
-                
+
+                <div class="view" id="view-econ">
+                    <div class="view-header">
+                        <h2>Economic Calendar</h2>
+                    </div>
+                    <div id="econCalendarContent"></div>
+                </div>
+
                 <div class="view" id="view-surface">
-                    <div class="view-header"><h2>Vol Surface 3D</h2></div>
+                    <div class="view-header">
+                        <h2>Vol Surface 3D</h2>
+                    </div>
                     <div id="surfaceContent"></div>
                 </div>
 
@@ -713,4 +813,5 @@
 
     <script src="/static/js/app.js"></script>
 </body>
+
 </html>
