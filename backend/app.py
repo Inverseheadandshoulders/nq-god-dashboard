@@ -1246,7 +1246,7 @@ def get_gex(symbol: str = Query("SPY")) -> Dict[str, Any]:
         
         # Compute fresh GEX data
         if theta:
-            settings = ComputeSettings(dte_max=60)
+            settings = ComputeSettings()
             result = compute_gex_snapshot(theta, symbol, settings)
             if result:
                 store.add_snapshot(symbol, "GEX", datetime.now(timezone.utc).isoformat(), result)
