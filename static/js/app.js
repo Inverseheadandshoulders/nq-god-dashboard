@@ -2780,7 +2780,7 @@ const App = {
                 color: '#ffffff'
             },
             hovertemplate: '<b>%{label}</b><br>Change: %{text}<br>Market Cap: $%{value:.0f}B<extra></extra>',
-            branchvalues: 'total',
+            branchvalues: 'remainder',
             maxdepth: 2
         };
 
