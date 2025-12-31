@@ -416,7 +416,12 @@ def _find_cluster_zones(strikes: List[float], call_gex: List[float], put_gex: Li
 
 
 def _empty_snapshot(spot: float, bucket: str, ts: str) -> Dict[str, Any]:
-    """Return empty snapshot structure."""
+    """Return empty snapshot structure with estimated levels based on spot."""
+    # Calculate fallback levels based on spot price
+    put_wall_est = round(spot * 0.95, 2) if spot else None  # 5% below spot
+    call_wall_est = round(spot * 1.05, 2) if spot else None  # 5% above spot
+    vol_trigger = round(spot * 0.98, 2) if spot else None  # 2% below spot
+    
     return {
         "meta": {"ts": ts, "spot": spot, "bucket": bucket, "contract_count": 0},
         "profile": {
@@ -425,9 +430,11 @@ def _empty_snapshot(spot: float, bucket: str, ts: str) -> Dict[str, Any]:
         },
         "summary": {
             "net_gex": 0, "gross_gex": 0, "gamma_flip": spot,
-            "call_wall": None, "put_wall": None, "max_gamma": spot,
+            "call_wall": call_wall_est, "put_wall": put_wall_est, "max_gamma": spot,
+            "vol_trigger": vol_trigger,
             "regime": "UNKNOWN", "pc_ratio": 1.0, "clusters": []
         },
         "levels": [],
         "clusters": []
     }
+

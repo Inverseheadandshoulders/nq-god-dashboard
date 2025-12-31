@@ -792,11 +792,24 @@ const App = {
 
     // ==================== SEASONALITY (Unusual Whales Style) ====================
 
-    renderSeasonality: function () {
+    renderSeasonality: async function () {
         const symbol = this.state.symbol;
-        const ohlc = this.state.ohlc;
-
         this.setText('seasonSymbol', symbol);
+
+        // Fetch 15 years of data for seasonality analysis (~5475 days)
+        let ohlc = this.state.ohlc;
+        try {
+            const res = await fetch(`/api/ohlc/${symbol}?days=5475`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.data && data.data.length > 100) {
+                    ohlc = data.data;
+                    console.log(`[Seasonality] Loaded ${ohlc.length} days of data for ${symbol}`);
+                }
+            }
+        } catch (e) {
+            console.log('[Seasonality] Fallback to state ohlc');
+        }
 
         this.renderSeasonalityHeatmap(symbol, ohlc);
         this.renderSeasonalityDistribution(symbol, ohlc);
