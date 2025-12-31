@@ -1377,14 +1377,40 @@ const App = {
         try {
             const res = await fetch('/api/snapshot?symbol=' + symbol);
             if (res.ok) {
-                gexData = await res.json();
+                const apiData = await res.json();
+
+                // Transform API response to expected format for rendering
+                // API returns: { meta, profile: {strikes, call_gex, put_gex, net_gex}, summary }
+                if (apiData && apiData.profile && apiData.profile.strikes && apiData.profile.strikes.length > 0) {
+                    const profile = apiData.profile;
+
+                    // Map arrays to objects per strike
+                    const strikes = profile.strikes.map((strike, i) => ({
+                        strike: strike,
+                        call_gex: profile.call_gex?.[i] || 0,
+                        put_gex: profile.put_gex?.[i] || 0,
+                        net_gex: profile.net_gex?.[i] || 0,
+                        call_oi: profile.call_oi?.[i] || 0,
+                        put_oi: profile.put_oi?.[i] || 0
+                    }));
+
+                    gexData = {
+                        meta: apiData.meta,
+                        strikes: strikes,
+                        summary: apiData.summary,
+                        levels: apiData.levels,
+                        clusters: apiData.clusters
+                    };
+
+                    console.log('[GEX] Loaded', strikes.length, 'strikes for', symbol);
+                }
             }
         } catch (e) {
-            console.log('GEX API fetch failed, using sample data');
+            console.log('GEX API fetch failed, using sample data', e);
         }
 
         // Use sample data if API fails
-        if (!gexData || !gexData.strikes) {
+        if (!gexData || !gexData.strikes || gexData.strikes.length === 0) {
             gexData = this.generateGOFData(symbol);
         }
 
