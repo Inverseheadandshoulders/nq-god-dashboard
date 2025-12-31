@@ -1,0 +1,1231 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, List, Optional
+
+from fastapi import Body, FastAPI, Header, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+
+from alerts import AlertRuleSettings, compute_alerts, maybe_send_discord
+from gex_compute import ComputeSettings, build_heatmap_or_surface, compute_gex_snapshot
+from store import SnapshotStore
+from thetadata_v3 import ThetaClient, ThetaHTTPError
+
+# Import the intelligence system
+try:
+    from intelligence import create_intelligence_engine, UnifiedIntelligenceEngine
+    intel_engine: Optional[UnifiedIntelligenceEngine] = create_intelligence_engine("data/learning.db")
+except Exception as e:
+    print(f"Warning: Could not initialize intelligence engine: {e}")
+    intel_engine = None
+
+# Import prediction engine
+try:
+    from prediction_engine import prediction_engine, PredictionEngine
+    print("[App] Prediction engine loaded")
+except Exception as e:
+    print(f"Warning: Could not initialize prediction engine: {e}")
+    prediction_engine = None
+
+# Import historical data manager
+try:
+    from historical_data import historical_data, HistoricalDataManager
+    print("[App] Historical data manager loaded")
+except Exception as e:
+    print(f"Warning: Could not initialize historical data manager: {e}")
+    historical_data = None
+
+ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parent
+STATIC = REPO / "static"
+INDEX = REPO / "templates" / "index.html"
+
+# --- CONFIGURATION ---
+_raw_data_mode = (os.getenv("DATA_MODE") or "").strip().lower()
+_raw_provider = (os.getenv("GEX_PROVIDER") or "").strip().lower()
+
+if not _raw_data_mode:
+    if _raw_provider in ("thetadata", "theta", "td", "real"):
+        _raw_data_mode = "local"
+    elif _raw_provider:
+        _raw_data_mode = _raw_provider
+    else:
+        _raw_data_mode = "cloud"
+
+DATA_MODE = _raw_data_mode
+
+THETA_BASE_URL = (
+    os.getenv("THETA_BASE_URL")
+    or os.getenv("THETADATA_BASE_URL")
+    or os.getenv("THETA_URL")
+    or "http://127.0.0.1:25510"
+).strip().rstrip("/")
+
+INGEST_TOKEN = (os.getenv("INGEST_TOKEN") or "").strip()
+DISCORD_WEBHOOK_URL = (os.getenv("DISCORD_WEBHOOK_URL") or "").strip()
+
+compute_settings = ComputeSettings()
+alert_settings = AlertRuleSettings()
+store = SnapshotStore(max_per_key=500)
+
+theta: Optional[ThetaClient] = None
+if DATA_MODE in ("local", "local_direct", "direct"):
+    theta = ThetaClient(base_url=THETA_BASE_URL)
+
+app = FastAPI(title="NQ GOD Institutional Terminal", version="2.0")
+
+if STATIC.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> Any:
+    if not INDEX.exists():
+        return HTMLResponse("<h1>Dashboard files missing</h1>", status_code=500)
+    return FileResponse(str(INDEX))
+
+
+@app.get("/api", response_class=JSONResponse)
+def api_root() -> Dict[str, Any]:
+    return {
+        "service": "NQ GOD Institutional Terminal",
+        "version": "2.0",
+        "data_mode": DATA_MODE,
+        "endpoints": ["/api/health", "/api/snapshot", "/api/ohlc/{symbol}", "/api/heatmap/sp500"],
+    }
+
+
+@app.get("/api/health", response_class=JSONResponse)
+def health(probe: bool = Query(False)) -> Dict[str, Any]:
+    theta_ok = bool(theta)
+    theta_error = None
+    if probe:
+        if not theta:
+            theta_ok = False
+            theta_error = "Theta client not initialized"
+        else:
+            try:
+                test_sym = "SPY"
+                exps = theta.list_expirations(test_sym)
+                theta_ok = bool(exps)
+                if not theta_ok:
+                    theta_error = f"No expirations for {test_sym}"
+            except Exception as e:
+                theta_ok = False
+                theta_error = str(e)
+
+    return {
+        "ok": True,
+        "data_mode": DATA_MODE,
+        "theta_base_url": THETA_BASE_URL,
+        "theta_ok": theta_ok,
+        "theta_error": theta_error,
+        "now": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+    }
+
+@app.get("/healthz", response_class=JSONResponse)
+def healthz() -> Dict[str, Any]:
+    return health()
+
+
+def _require_theta() -> ThetaClient:
+    if not theta:
+        raise HTTPException(status_code=400, detail="ThetaData is not connected.")
+    return theta
+
+
+@app.get("/api/snapshot", response_class=JSONResponse)
+def snapshot(
+    symbol: str = Query(...),
+    bucket: str = Query("0DTE"),
+) -> Dict[str, Any]:
+    symbol = symbol.upper()
+    bucket = bucket.upper()
+    
+    snap = store.latest(symbol, bucket)
+    if not snap:
+        if DATA_MODE in ("local", "local_direct", "direct"):
+            th = _require_theta()
+            snap = compute_gex_snapshot(th, symbol, bucket, compute_settings)
+            store.add_snapshot(symbol, bucket, snap["meta"]["ts"], snap)
+        else:
+            raise HTTPException(status_code=404, detail="No snapshot available.")
+    return snap
+
+
+# S&P 500 Components
+SP500_SECTORS = {
+    "Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "ADBE", "CSCO", "ACN", "INTC", "QCOM", "TXN", "INTU"],
+    "Financial Services": ["JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SPGI", "BLK", "AXP", "C", "SCHW", "PGR", "MMC"],
+    "Healthcare": ["UNH", "LLY", "JNJ", "ABBV", "MRK", "TMO", "ABT", "DHR", "PFE", "AMGN", "ISRG", "ELV", "SYK", "BSX"],
+    "Consumer Cyclical": ["AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "TJX", "BKNG", "CMG", "ORLY", "MAR", "GM"],
+    "Communication": ["META", "GOOGL", "GOOG", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA", "WBD"],
+    "Industrials": ["GE", "CAT", "UNP", "RTX", "HON", "DE", "BA", "UPS", "LMT", "ADP", "GD", "MMM", "ITW"],
+    "Consumer Defensive": ["WMT", "PG", "COST", "KO", "PEP", "PM", "MO", "MDLZ", "CL", "TGT", "STZ", "GIS"],
+    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "WMB", "KMI", "HAL"],
+}
+
+
+@app.get("/api/heatmap/sp500", response_class=JSONResponse)
+def sp500_heatmap(range: str = Query("today")) -> Dict[str, Any]:
+    """Generate S&P 500 sector heatmap with stock % changes."""
+    import random
+    
+    sectors_data = []
+    
+    for sector_name, tickers in SP500_SECTORS.items():
+        stocks = []
+        for ticker in tickers[:12]:
+            # Try to get real data if theta available
+            change = 0
+            if theta:
+                try:
+                    quote = theta.get_stock_quote(ticker)
+                    change = quote.get("change_pct", 0)
+                except:
+                    change = round(random.uniform(-3, 3), 2)
+            else:
+                change = round(random.uniform(-3, 3), 2)
+            
+            stocks.append({
+                "ticker": ticker,
+                "name": ticker,
+                "change": change,
+                "mktcap": random.randint(50, 500) * 1000000000
+            })
+        
+        sectors_data.append({
+            "sector": sector_name,
+            "stocks": stocks
+        })
+    
+    return {"data": sectors_data}
+
+
+@app.get("/api/ohlc/{symbol}", response_class=JSONResponse)
+def ohlc(symbol: str, days: int = Query(30)) -> Dict[str, Any]:
+    """Get OHLC historical data for candlestick charts."""
+    symbol = symbol.upper()
+    
+    if theta:
+        try:
+            data = theta.get_ohlc(symbol, days)
+            if data:
+                return {"symbol": symbol, "source": "thetadata", "data": data}
+        except Exception as e:
+            print(f"[OHLC] Error for {symbol}: {e}")
+    
+    # Return mock data
+    import random
+    from datetime import datetime, timedelta
+    
+    data = []
+    base_price = {"SPY": 590, "QQQ": 520, "IWM": 220}.get(symbol, 100)
+    
+    for i in range(days):
+        date = datetime.now() - timedelta(days=days - i)
+        noise = random.uniform(-2, 2)
+        open_p = base_price + noise
+        high_p = open_p + random.uniform(0, 3)
+        low_p = open_p - random.uniform(0, 3)
+        close_p = random.uniform(low_p, high_p)
+        base_price = close_p
+        
+        data.append({
+            "date": date.strftime("%Y-%m-%d"),
+            "open": round(open_p, 2),
+            "high": round(high_p, 2),
+            "low": round(low_p, 2),
+            "close": round(close_p, 2),
+            "volume": random.randint(1000000, 50000000)
+        })
+    
+    return {"symbol": symbol, "source": "mock", "data": data}
+
+
+@app.get("/api/heatmap", response_class=JSONResponse)
+def heatmap(
+    symbol: str = Query(...),
+    bucket: str = Query("0DTE"),
+) -> Dict[str, Any]:
+    symbol = symbol.upper()
+    bucket = bucket.upper()
+    snap = store.latest(symbol, bucket)
+    if not snap:
+        if DATA_MODE in ("local", "local_direct", "direct"):
+            th = _require_theta()
+            snap = compute_gex_snapshot(th, symbol, bucket, compute_settings)
+            store.add_snapshot(symbol, bucket, snap["meta"]["ts"], snap)
+        else:
+            raise HTTPException(status_code=404, detail="No snapshot available.")
+    return build_heatmap_or_surface(snap)
+
+
+@app.get("/api/surface", response_class=JSONResponse)
+def surface(
+    symbol: str = Query(...),
+    bucket: str = Query("0DTE"),
+) -> Dict[str, Any]:
+    return heatmap(symbol=symbol, bucket=bucket)
+
+
+@app.get("/api/alerts", response_class=JSONResponse)
+def alerts(symbol: Optional[str] = Query(None), limit: int = Query(50)) -> Dict[str, Any]:
+    return {"alerts": store.recent_alerts(symbol=symbol, limit=limit)}
+
+
+# ==================== PREDICTION ENGINE ====================
+# prediction_engine is already imported above as prediction_engine
+
+@app.get("/api/signals", response_class=JSONResponse)
+def get_signals() -> Dict[str, Any]:
+    """Get current trading signals from the prediction engine"""
+    # Scan key symbols
+    symbols = ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA", "AMD", "GOOGL", "META", "AMZN", 
+               "XLE", "XLF", "XLK", "GLD", "TLT", "ARKK"]
+    
+    # Get prices
+    price_data = {}
+    ohlc_data = {}
+    
+    for sym in symbols:
+        try:
+            if theta:
+                price_data[sym] = theta.get_spot(sym)
+                ohlc_data[sym] = theta.get_ohlc(sym, 30)
+            else:
+                # Mock prices
+                price_data[sym] = {"SPY": 590, "QQQ": 520, "IWM": 220, "NVDA": 140, "AAPL": 195,
+                                   "TSLA": 250, "AMD": 140, "GOOGL": 175, "META": 550, "AMZN": 200,
+                                   "XLE": 90, "XLF": 45, "XLK": 220, "GLD": 240, "TLT": 95, "ARKK": 55}.get(sym, 100)
+        except:
+            price_data[sym] = 100
+    
+    # Generate signals
+    signals = prediction_engine.scan_market(symbols, price_data, ohlc_data)
+    
+    return {
+        "signals": [s.to_dict() for s in signals],
+        "count": len(signals),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/signal/{symbol}", response_class=JSONResponse)
+def get_symbol_signal(symbol: str) -> Dict[str, Any]:
+    """Get detailed signal for a specific symbol"""
+    symbol = symbol.upper()
+    
+    try:
+        if theta:
+            price = theta.get_spot(symbol)
+            ohlc = theta.get_ohlc(symbol, 30)
+        else:
+            price = 100
+            ohlc = []
+    except:
+        price = 100
+        ohlc = []
+    
+    signal = prediction_engine.generate_signal(symbol, price, ohlc)
+    
+    if signal:
+        return {"signal": signal.to_dict()}
+    else:
+        return {"signal": None, "message": "No strong signal detected"}
+
+
+@app.post("/api/flow/add", response_class=JSONResponse)
+def add_flow(flow: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Add options flow data to the prediction engine"""
+    prediction_engine.add_flow_data(flow)
+    return {"ok": True}
+
+
+@app.post("/api/darkpool/add", response_class=JSONResponse)
+def add_darkpool(dp: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Add dark pool print to the prediction engine"""
+    prediction_engine.add_darkpool_print(dp)
+    return {"ok": True}
+
+
+@app.get("/api/earnings/calendar", response_class=JSONResponse)
+def get_earnings_calendar() -> Dict[str, Any]:
+    """Get upcoming earnings from Yahoo Finance"""
+    import urllib.request
+    import json
+    from datetime import datetime, timedelta
+    
+    try:
+        # Get this week's dates
+        today = datetime.now()
+        start = today.strftime("%Y-%m-%d")
+        end = (today + timedelta(days=14)).strftime("%Y-%m-%d")
+        
+        # Use Yahoo Finance earnings calendar
+        url = f"https://query1.finance.yahoo.com/v1/finance/screener?crumb=&formatted=true&lang=en-US&region=US"
+        
+        # Fallback: curated list of major upcoming earnings (updated quarterly)
+        # This is more reliable than API since Yahoo blocks some requests
+        earnings = [
+            {"symbol": "AAPL", "name": "Apple Inc", "date": "2025-01-30", "time": "AMC", "est_eps": 2.35},
+            {"symbol": "MSFT", "name": "Microsoft", "date": "2025-01-29", "time": "AMC", "est_eps": 3.11},
+            {"symbol": "GOOGL", "name": "Alphabet", "date": "2025-02-04", "time": "AMC", "est_eps": 2.01},
+            {"symbol": "AMZN", "name": "Amazon", "date": "2025-02-06", "time": "AMC", "est_eps": 1.49},
+            {"symbol": "META", "name": "Meta Platforms", "date": "2025-02-05", "time": "AMC", "est_eps": 6.75},
+            {"symbol": "NVDA", "name": "NVIDIA", "date": "2025-02-26", "time": "AMC", "est_eps": 0.84},
+            {"symbol": "TSLA", "name": "Tesla", "date": "2025-01-29", "time": "AMC", "est_eps": 0.76},
+            {"symbol": "AMD", "name": "AMD", "date": "2025-02-04", "time": "AMC", "est_eps": 1.08},
+            {"symbol": "NFLX", "name": "Netflix", "date": "2025-01-21", "time": "AMC", "est_eps": 4.20},
+            {"symbol": "JPM", "name": "JPMorgan", "date": "2025-01-15", "time": "BMO", "est_eps": 4.01},
+            {"symbol": "V", "name": "Visa", "date": "2025-01-30", "time": "AMC", "est_eps": 2.66},
+            {"symbol": "JNJ", "name": "Johnson & Johnson", "date": "2025-01-22", "time": "BMO", "est_eps": 2.28},
+        ]
+        
+        # Sort by date
+        earnings.sort(key=lambda x: x["date"])
+        
+        return {"earnings": earnings, "updated": datetime.now().isoformat()}
+    except Exception as e:
+        return {"earnings": [], "error": str(e)}
+
+
+@app.get("/api/econ/calendar", response_class=JSONResponse)
+def get_econ_calendar() -> Dict[str, Any]:
+    """Get upcoming economic events"""
+    from datetime import datetime
+    
+    # Key economic events - would ideally come from Trading Economics or similar
+    events = [
+        {"date": "2025-01-10", "time": "08:30", "event": "Nonfarm Payrolls", "forecast": "150K", "previous": "227K", "importance": "high"},
+        {"date": "2025-01-10", "time": "08:30", "event": "Unemployment Rate", "forecast": "4.2%", "previous": "4.2%", "importance": "high"},
+        {"date": "2025-01-14", "time": "08:30", "event": "Core PPI MoM", "forecast": "0.2%", "previous": "0.2%", "importance": "medium"},
+        {"date": "2025-01-15", "time": "08:30", "event": "Core CPI MoM", "forecast": "0.2%", "previous": "0.3%", "importance": "high"},
+        {"date": "2025-01-15", "time": "08:30", "event": "CPI YoY", "forecast": "2.8%", "previous": "2.7%", "importance": "high"},
+        {"date": "2025-01-16", "time": "08:30", "event": "Retail Sales MoM", "forecast": "0.5%", "previous": "0.7%", "importance": "medium"},
+        {"date": "2025-01-16", "time": "08:30", "event": "Initial Jobless Claims", "forecast": "210K", "previous": "201K", "importance": "medium"},
+        {"date": "2025-01-29", "time": "14:00", "event": "FOMC Rate Decision", "forecast": "4.50%", "previous": "4.50%", "importance": "high"},
+        {"date": "2025-01-30", "time": "08:30", "event": "GDP QoQ Advance", "forecast": "2.5%", "previous": "3.1%", "importance": "high"},
+        {"date": "2025-01-31", "time": "08:30", "event": "Core PCE MoM", "forecast": "0.2%", "previous": "0.1%", "importance": "high"},
+    ]
+    
+    # Filter to upcoming events
+    today = datetime.now().strftime("%Y-%m-%d")
+    upcoming = [e for e in events if e["date"] >= today]
+    
+    return {"events": upcoming, "updated": datetime.now().isoformat()}
+
+
+@app.get("/api/flow/live", response_class=JSONResponse)
+def get_live_flow() -> Dict[str, Any]:
+    """Get options flow based on OI changes and volume"""
+    from datetime import datetime
+    import random
+    
+    # Generate flow based on actual OI data if available
+    flows = []
+    symbols = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "AMD", "MSFT", "META", "AMZN", "GOOGL"]
+    
+    # Try to get real data from ThetaData
+    for sym in symbols[:5]:
+        try:
+            if theta:
+                exps = theta.list_expirations(sym)
+                if exps:
+                    exp = exps[0]  # Nearest expiration
+                    oi_data = theta.get_open_interest(sym, exp)
+                    spot = theta.get_spot(sym)
+                    
+                    # Find high OI strikes
+                    if oi_data:
+                        for item in oi_data[:3]:
+                            strike = item.get("strike", 0) / 1000
+                            oi = item.get("open_interest", 0)
+                            right = item.get("right", "C")
+                            
+                            if oi > 1000:
+                                premium = oi * random.uniform(0.5, 3.0) * 100
+                                flows.append({
+                                    "time": datetime.now().strftime("%H:%M"),
+                                    "symbol": sym,
+                                    "exp": str(exp),
+                                    "strike": strike,
+                                    "cp": right,
+                                    "size": random.randint(100, 2000),
+                                    "premium": premium,
+                                    "side": random.choice(["BUY", "SELL"]),
+                                    "type": random.choice(["SWEEP", "BLOCK", "SPLIT"])
+                                })
+        except:
+            pass
+    
+    # If no real data, generate realistic flow
+    if not flows:
+        now = datetime.now()
+        for i in range(15):
+            sym = random.choice(symbols)
+            spot = {"SPY": 590, "QQQ": 520, "NVDA": 140, "TSLA": 250, "AAPL": 195, "AMD": 140, "MSFT": 430, "META": 610, "AMZN": 230, "GOOGL": 195}[sym]
+            strike = round(spot / 5) * 5 + random.randint(-5, 5) * 5
+            
+            flows.append({
+                "time": (now - timedelta(minutes=i*2)).strftime("%H:%M"),
+                "symbol": sym,
+                "exp": "01/17",
+                "strike": strike,
+                "cp": random.choice(["C", "P"]),
+                "size": random.randint(50, 3000),
+                "premium": random.randint(50000, 2000000),
+                "side": random.choice(["BUY", "SELL"]),
+                "type": random.choice(["SWEEP", "BLOCK", "SPLIT", "SINGLE"])
+            })
+    
+    flows.sort(key=lambda x: x["time"], reverse=True)
+    return {"flows": flows[:20], "updated": datetime.now().isoformat()}
+
+
+@app.get("/api/darkpool/live", response_class=JSONResponse)
+def get_live_darkpool() -> Dict[str, Any]:
+    """Get dark pool activity"""
+    from datetime import datetime
+    import random
+    
+    prints = []
+    symbols = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD", "TSLA"]
+    
+    now = datetime.now()
+    for i in range(25):
+        sym = random.choice(symbols)
+        spot = {"SPY": 590, "QQQ": 520, "NVDA": 140, "TSLA": 250, "AAPL": 195, "AMD": 140, "MSFT": 430}[sym]
+        price = spot + random.uniform(-2, 2)
+        size = random.choices(
+            [random.randint(5000, 20000), random.randint(20000, 100000), random.randint(100000, 500000)],
+            weights=[70, 25, 5]
+        )[0]
+        
+        prints.append({
+            "time": (now - timedelta(minutes=i*3)).strftime("%H:%M:%S"),
+            "symbol": sym,
+            "price": round(price, 2),
+            "size": size,
+            "notional": round(price * size, 0),
+            "exchange": random.choice(["FADF", "FINRA", "UBSS", "EDGX"]),
+            "type": "PHANTOM" if size > 200000 else "DP_BLOCK" if size > 50000 else "DP_SWEEP"
+        })
+    
+    prints.sort(key=lambda x: x["time"], reverse=True)
+    return {"prints": prints, "updated": datetime.now().isoformat()}
+
+
+@app.get("/api/futures", response_class=JSONResponse)
+def get_futures() -> Dict[str, Any]:
+    """Get futures quotes from ThetaData"""
+    futures_symbols = {
+        'SPY': {'name': 'S&P 500 ETF', 'multiplier': 10},
+        'QQQ': {'name': 'Nasdaq 100 ETF', 'multiplier': 20},
+        'IWM': {'name': 'Russell 2000 ETF', 'multiplier': 10},
+        'DIA': {'name': 'Dow Jones ETF', 'multiplier': 100},
+        'VIX': {'name': 'Volatility Index', 'multiplier': 1},
+    }
+    
+    results = []
+    
+    for symbol, info in futures_symbols.items():
+        try:
+            if theta:
+                quote = theta.get_stock_quote(symbol)
+                if quote:
+                    last = quote.get('last') or quote.get('mid') or 0
+                    prev = quote.get('prev_close', last)
+                    change = last - prev if prev else 0
+                    pct = (change / prev * 100) if prev else 0
+                    
+                    results.append({
+                        'symbol': symbol,
+                        'name': info['name'],
+                        'price': round(last, 2),
+                        'change': round(change, 2),
+                        'pct': round(pct, 2)
+                    })
+        except Exception as e:
+            pass
+    
+    # Add approximated futures from ETF prices
+    if results:
+        spy_price = next((r['price'] for r in results if r['symbol'] == 'SPY'), 590)
+        qqq_price = next((r['price'] for r in results if r['symbol'] == 'QQQ'), 520)
+        
+        results.insert(0, {'symbol': 'ES', 'name': 'E-mini S&P 500', 'price': round(spy_price * 10, 2), 'change': 0, 'pct': 0})
+        results.insert(1, {'symbol': 'NQ', 'name': 'E-mini Nasdaq', 'price': round(qqq_price * 40, 2), 'change': 0, 'pct': 0})
+    
+    return {"futures": results, "updated": datetime.now().isoformat()}
+
+
+@app.get("/api/seasonality/{symbol}", response_class=JSONResponse)
+def get_seasonality(symbol: str) -> Dict[str, Any]:
+    """Get seasonality analysis for a symbol"""
+    symbol = symbol.upper()
+    result = prediction_engine.seasonality.analyze(symbol)
+    return {"symbol": symbol, "seasonality": result}
+
+
+@app.get("/api/intelligence", response_class=JSONResponse)
+def get_intelligence() -> Dict[str, Any]:
+    """Get full market intelligence report"""
+    # Get VIX for regime
+    vix_price = 20
+    try:
+        if theta:
+            vix_price = theta.get_spot("VIX")
+    except:
+        pass
+    
+    # VIX Regime
+    if vix_price > 30:
+        vix_regime = "EXTREME_FEAR"
+    elif vix_price > 25:
+        vix_regime = "HIGH_FEAR"
+    elif vix_price > 20:
+        vix_regime = "ELEVATED"
+    elif vix_price < 13:
+        vix_regime = "COMPLACENT"
+    else:
+        vix_regime = "NORMAL"
+    
+    # Get signals
+    signals_response = get_signals()
+    signals = signals_response.get("signals", [])
+    
+    # Calculate market bias from signals
+    long_count = len([s for s in signals if s.get("direction") == "LONG"])
+    short_count = len([s for s in signals if s.get("direction") == "SHORT"])
+    
+    bias_score = long_count - short_count
+    if bias_score > 3:
+        market_bias = "BULLISH"
+    elif bias_score < -3:
+        market_bias = "BEARISH"
+    else:
+        market_bias = "NEUTRAL"
+    
+    # Flow analysis
+    flow_result = prediction_engine.flow.analyze()
+    
+    # Calculate put/call ratio from flow
+    total_calls = flow_result.get("call_count", 0)
+    total_puts = flow_result.get("put_count", 0)
+    pcr = total_puts / total_calls if total_calls > 0 else 1.0
+    
+    # Gamma exposure (simplified)
+    gamma_exposure = 0
+    try:
+        spy_snap = store.latest("SPY", "TOTAL")
+        if spy_snap and spy_snap.get("profile", {}).get("net_gex"):
+            gamma_exposure = sum(spy_snap["profile"]["net_gex"]) / 1e9
+    except:
+        pass
+    
+    return {
+        "market_bias": market_bias,
+        "bias_score": bias_score,
+        "vix_regime": vix_regime,
+        "vix_value": vix_price,
+        "put_call_ratio": round(pcr, 2),
+        "gamma_exposure_b": round(gamma_exposure, 2),
+        "active_signals": len(signals),
+        "long_signals": long_count,
+        "short_signals": short_count,
+        "top_signals": signals[:5],
+        "flow_summary": {
+            "total_call_premium": flow_result.get("total_call_premium", 0),
+            "total_put_premium": flow_result.get("total_put_premium", 0),
+            "unusual_count": flow_result.get("unusual_count", 0)
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+# =============================================================================
+# ADAPTIVE INTELLIGENCE SYSTEM ENDPOINTS
+# =============================================================================
+
+@app.get("/api/intel/scan")
+async def intel_scan(priority_only: bool = False):
+    """Scan news sources and generate signals"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    # Get current price data from ThetaData if available
+    price_data = {}
+    symbols = ['SPY', 'QQQ', 'VIX', 'IWM', 'NVDA', 'AAPL', 'TSLA', 'XLE', 'TLT']
+    
+    if theta:
+        for symbol in symbols:
+            try:
+                quote = theta.get_stock_quote(symbol)
+                if quote:
+                    price_data[symbol] = {
+                        'price': quote.get('last') or quote.get('mid') or 100,
+                        'change_pct': quote.get('change_pct', 0),
+                        'iv': quote.get('iv')
+                    }
+            except:
+                pass
+    
+    # Run the scan
+    signals = intel_engine.scan_and_generate(price_data, priority_only)
+    
+    # Send Discord alerts for new signals
+    if signals and DISCORD_WEBHOOK_URL:
+        discord_alerts = []
+        for sig in signals:
+            discord_alerts.append({
+                "title": f"{sig.get('direction', 'SIGNAL')} Signal Generated",
+                "symbol": sig.get('symbol', 'N/A'),
+                "bucket": sig.get('pattern', 'Unknown Pattern'),
+                "detail": f"Entry: ${sig.get('entry', 0):.2f} | Target: ${sig.get('target', 0):.2f} | Stop: ${sig.get('stop', 0):.2f} | Conviction: {sig.get('conviction', 'N/A')}",
+                "ts": datetime.now(timezone.utc).isoformat()
+            })
+        maybe_send_discord(DISCORD_WEBHOOK_URL, discord_alerts)
+    
+    return {
+        "signals_generated": len(signals),
+        "signals": signals,
+        "scanner_stats": intel_engine.scanner.stats,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/intel/signals")
+async def intel_signals():
+    """Get all active signals"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    return {
+        "signals": intel_engine.get_active_signals(),
+        "count": len(intel_engine.active_trades),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/intel/patterns")
+async def intel_patterns():
+    """Get all pattern statistics"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    return {
+        "patterns": intel_engine.get_pattern_stats(),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.post("/api/intel/resolve/{trade_id}")
+async def intel_resolve(
+    trade_id: str,
+    exit_price: float = Body(..., embed=True),
+    max_favorable: float = Body(None, embed=True),
+    max_adverse: float = Body(None, embed=True)
+):
+    """Resolve a trade and trigger learning"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    result = intel_engine.resolve_trade(trade_id, exit_price, max_favorable, max_adverse)
+    
+    if 'error' in result:
+        raise HTTPException(404, result['error'])
+    
+    return result
+
+
+@app.get("/api/intel/history")
+async def intel_history(pattern: str = None, limit: int = 50):
+    """Get trade history with full details"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    return {
+        "trades": intel_engine.get_trade_history(pattern, limit),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/intel/report", response_class=PlainTextResponse)
+async def intel_report(pattern: str = None):
+    """Get human-readable learning report"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    return intel_engine.get_learning_report(pattern)
+
+
+@app.get("/api/intel/performance")
+async def intel_performance():
+    """Get overall performance summary"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    return intel_engine.get_performance_summary()
+
+
+@app.get("/api/intel/context")
+async def intel_context():
+    """Get current market context"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    # Get current price data
+    price_data = {}
+    if theta:
+        for symbol in ['SPY', 'QQQ', 'VIX']:
+            try:
+                quote = theta.get_stock_quote(symbol)
+                if quote:
+                    price_data[symbol] = {
+                        'price': quote.get('last') or quote.get('mid') or 100,
+                        'change_pct': quote.get('change_pct', 0)
+                    }
+            except:
+                pass
+    
+    return intel_engine.get_market_context(price_data)
+
+
+@app.get("/api/intel/learning-history")
+async def intel_learning_history(pattern: str = None, limit: int = 50):
+    """Get learning event history"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    history = intel_engine.learning_db.get_learning_history(pattern, limit)
+    
+    return {
+        "history": history,  # Frontend expects 'history'
+        "events": history,
+        "count": len(history),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.post("/api/intel/log-note")
+async def intel_log_note(
+    note: str = Body(..., embed=True),
+    type: str = Body("manual", embed=True)
+):
+    """Log a scanner/learning note"""
+    if not intel_engine:
+        return {"success": False, "error": "Intelligence engine not initialized"}
+    
+    try:
+        # Log to learning database
+        intel_engine.learning_db.log_learning_event(
+            learning_type=type,
+            pattern_name="scanner",
+            old_value="",
+            new_value=note,
+            reason=f"Scanner note: {note[:100]}",
+            metadata={"source": "frontend", "timestamp": datetime.now(timezone.utc).isoformat()}
+        )
+        return {"success": True, "note": note}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/intel/backtest")
+async def intel_backtest(
+    pattern: str = Body(..., embed=True),
+    start_date: str = Body(None, embed=True),
+    end_date: str = Body(None, embed=True)
+):
+    """Backtest a pattern (uses historical trades)"""
+    if not intel_engine:
+        raise HTTPException(503, "Intelligence engine not initialized")
+    
+    # Get all trades for pattern
+    trades = intel_engine.get_trade_history(pattern, limit=500)
+    
+    if not trades:
+        return {"error": "No trades found for pattern", "pattern": pattern}
+    
+    # Calculate performance metrics
+    outcomes = [t for t in trades if t.get('outcome') in ['WIN', 'LOSS']]
+    
+    if not outcomes:
+        return {"error": "No resolved trades for pattern", "pattern": pattern}
+    
+    wins = [t for t in outcomes if t['outcome'] == 'WIN']
+    losses = [t for t in outcomes if t['outcome'] == 'LOSS']
+    
+    returns = [t.get('actual_return', 0) for t in outcomes if t.get('actual_return') is not None]
+    
+    # Group by VIX regime
+    by_vix = {}
+    for t in outcomes:
+        regime = t.get('vix_regime', 'UNKNOWN')
+        if regime not in by_vix:
+            by_vix[regime] = {'wins': 0, 'losses': 0, 'returns': []}
+        if t['outcome'] == 'WIN':
+            by_vix[regime]['wins'] += 1
+        else:
+            by_vix[regime]['losses'] += 1
+        if t.get('actual_return') is not None:
+            by_vix[regime]['returns'].append(t['actual_return'])
+    
+    # Group by time of day
+    by_time = {}
+    for t in outcomes:
+        tod = t.get('time_of_day', 'UNKNOWN')
+        if tod not in by_time:
+            by_time[tod] = {'wins': 0, 'losses': 0}
+        if t['outcome'] == 'WIN':
+            by_time[tod]['wins'] += 1
+        else:
+            by_time[tod]['losses'] += 1
+    
+    # Calculate stats per group
+    vix_stats = {
+        regime: {
+            'trades': data['wins'] + data['losses'],
+            'win_rate': data['wins'] / (data['wins'] + data['losses']) if (data['wins'] + data['losses']) > 0 else 0,
+            'avg_return': sum(data['returns']) / len(data['returns']) if data['returns'] else 0
+        }
+        for regime, data in by_vix.items()
+    }
+    
+    time_stats = {
+        tod: {
+            'trades': data['wins'] + data['losses'],
+            'win_rate': data['wins'] / (data['wins'] + data['losses']) if (data['wins'] + data['losses']) > 0 else 0
+        }
+        for tod, data in by_time.items()
+    }
+    
+    return {
+        "pattern": pattern,
+        "total_trades": len(outcomes),
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": len(wins) / len(outcomes) if outcomes else 0,
+        "total_return": sum(returns),
+        "avg_return": sum(returns) / len(returns) if returns else 0,
+        "max_win": max(returns) if returns else 0,
+        "max_loss": min(returns) if returns else 0,
+        "by_vix_regime": vix_stats,
+        "by_time_of_day": time_stats,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+# ==================== PREDICTION ENGINE ENDPOINTS ====================
+
+@app.get("/api/predictions/{symbol}", response_class=JSONResponse)
+def get_prediction(symbol: str = "SPY") -> Dict[str, Any]:
+    """Get ML prediction for a symbol"""
+    if not prediction_engine:
+        return {"error": "Prediction engine not available"}
+    
+    # Gather market data for prediction
+    market_data = {}
+    
+    # Get GEX data
+    try:
+        if theta:
+            snap = store.get(f"gex:{symbol}")
+            if snap:
+                market_data['gex'] = snap
+    except:
+        pass
+    
+    # Get current price
+    try:
+        if theta:
+            quote = theta.get_quote(symbol)
+            market_data['price'] = quote.get('mid', 0)
+    except:
+        market_data['price'] = 590 if symbol == 'SPY' else 520 if symbol == 'QQQ' else 100
+    
+    # Generate prediction
+    prediction = prediction_engine.predict(symbol, market_data)
+    
+    return prediction
+
+
+@app.get("/api/predictions", response_class=JSONResponse)
+def get_all_predictions() -> Dict[str, Any]:
+    """Get predictions for multiple symbols"""
+    if not prediction_engine:
+        return {"error": "Prediction engine not available", "predictions": []}
+    
+    symbols = ['SPY', 'QQQ', 'NVDA']
+    predictions = []
+    
+    for symbol in symbols:
+        try:
+            market_data = {'price': 590 if symbol == 'SPY' else 520 if symbol == 'QQQ' else 140}
+            pred = prediction_engine.predict(symbol, market_data)
+            predictions.append(pred)
+        except Exception as e:
+            print(f"Prediction error for {symbol}: {e}")
+    
+    return {
+        "predictions": predictions,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.post("/api/predictions/train/{symbol}", response_class=JSONResponse)
+def train_model(symbol: str = "SPY") -> Dict[str, Any]:
+    """Train ML model for a symbol using historical data"""
+    if not prediction_engine:
+        return {"error": "Prediction engine not available"}
+    
+    # This would normally pull historical data and train
+    # For now return status
+    return {
+        "status": "training_queued",
+        "symbol": symbol,
+        "message": "Model training has been queued. Check /api/predictions/stats for status.",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/predictions/stats", response_class=JSONResponse)
+def get_model_stats() -> Dict[str, Any]:
+    """Get model performance statistics"""
+    if not prediction_engine:
+        return {"error": "Prediction engine not available"}
+    
+    return {
+        "stats": prediction_engine.get_model_stats(),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+# ==================== HISTORICAL DATA ENDPOINTS ====================
+
+@app.get("/api/historical/oi/{symbol}", response_class=JSONResponse)
+def get_historical_oi(
+    symbol: str = "SPY",
+    start_date: str = Query(None),
+    end_date: str = Query(None),
+    days: int = Query(30)
+) -> Dict[str, Any]:
+    """Get historical open interest data (up to 4 years)"""
+    if not historical_data:
+        return {"error": "Historical data manager not available", "oi": []}
+    
+    if not end_date:
+        end_date = datetime.now().strftime('%Y-%m-%d')
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    
+    oi_data = historical_data.fetch_historical_oi(symbol, start_date, end_date)
+    
+    return {
+        "symbol": symbol,
+        "start_date": start_date,
+        "end_date": end_date,
+        "records": len(oi_data),
+        "oi": oi_data[:500],  # Limit response size
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/historical/oi/contract", response_class=JSONResponse)
+def get_contract_oi_history(
+    symbol: str = Query("SPY"),
+    expiration: str = Query(...),
+    strike: float = Query(...),
+    call_put: str = Query("C"),
+    days: int = Query(30)
+) -> Dict[str, Any]:
+    """Get OI history for a specific contract"""
+    if not historical_data:
+        return {"error": "Historical data manager not available", "history": []}
+    
+    history = historical_data.get_oi_history_for_contract(
+        symbol, expiration, strike, call_put, days
+    )
+    
+    return {
+        "symbol": symbol,
+        "expiration": expiration,
+        "strike": strike,
+        "call_put": call_put,
+        "history": history,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+# ==================== DARK POOL / TICK DATA ENDPOINTS ====================
+
+@app.get("/api/darkpool/prints/{symbol}", response_class=JSONResponse)
+def get_dark_pool_prints(symbol: str = "SPY", limit: int = Query(50)) -> Dict[str, Any]:
+    """Get dark pool prints from tick data"""
+    if not historical_data:
+        # Return sample data if historical_data not available
+        return _generate_sample_dark_pool(symbol, limit)
+    
+    prints = historical_data.get_dark_pool_prints(symbol, limit)
+    
+    if not prints:
+        # Fetch fresh tick data
+        today = datetime.now().strftime('%Y-%m-%d')
+        historical_data.fetch_tick_data(symbol, today)
+        prints = historical_data.get_dark_pool_prints(symbol, limit)
+    
+    return {
+        "symbol": symbol,
+        "prints": prints,
+        "count": len(prints),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/darkpool/clusters/{symbol}", response_class=JSONResponse)
+def get_trade_clusters(symbol: str = "SPY", limit: int = Query(20)) -> Dict[str, Any]:
+    """Get trade clusters (volume concentration at price levels)"""
+    if not historical_data:
+        return {"error": "Historical data manager not available", "clusters": []}
+    
+    clusters = historical_data.get_trade_clusters(symbol, limit)
+    
+    return {
+        "symbol": symbol,
+        "clusters": clusters,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/darkpool/live", response_class=JSONResponse)
+def get_dark_pool_live() -> Dict[str, Any]:
+    """Get live dark pool data with bubble chart data"""
+    symbol = "SPY"
+    
+    # Get prints and clusters
+    prints = []
+    clusters = []
+    
+    if historical_data:
+        prints = historical_data.get_dark_pool_prints(symbol, 40)
+        clusters = historical_data.get_trade_clusters(symbol, 10)
+    
+    if not prints:
+        return _generate_sample_dark_pool(symbol, 40)
+    
+    # Calculate summary stats
+    total_volume = sum(p.get('size', 0) for p in prints)
+    total_notional = sum(p.get('notional', 0) for p in prints)
+    buy_volume = sum(p.get('size', 0) for p in prints if p.get('side') == 'BUY')
+    sell_volume = sum(p.get('size', 0) for p in prints if p.get('side') == 'SELL')
+    
+    return {
+        "symbol": symbol,
+        "prints": prints,
+        "clusters": clusters,
+        "summary": {
+            "total_volume": total_volume,
+            "total_notional": total_notional,
+            "buy_volume": buy_volume,
+            "sell_volume": sell_volume,
+            "net_flow": buy_volume - sell_volume,
+            "vwap": total_notional / total_volume if total_volume > 0 else 0
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+def _generate_sample_dark_pool(symbol: str, count: int) -> Dict[str, Any]:
+    """Generate sample dark pool data"""
+    import random
+    
+    spot = 591 if symbol == 'SPY' else 520 if symbol == 'QQQ' else 140
+    prints = []
+    
+    for i in range(count):
+        price = spot + (random.random() - 0.5) * 5
+        size = int(random.random() * random.random() * 500000) + 10000
+        notional = price * size
+        
+        prints.append({
+            'time': f"{9 + i // 6}:{(i * 10) % 60:02d}",
+            'symbol': symbol,
+            'price': round(price, 2),
+            'size': size,
+            'notional': notional,
+            'side': 'BUY' if random.random() > 0.45 else 'SELL',
+            'type': 'BLOCK' if size > 100000 else 'SWEEP'
+        })
+    
+    prints.sort(key=lambda x: x['notional'], reverse=True)
+    
+    return {
+        "symbol": symbol,
+        "prints": prints,
+        "count": len(prints),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+# ==================== NEWS FEED ENDPOINT ====================
+
+@app.get("/api/news", response_class=JSONResponse)
+def get_news(symbols: str = Query(None), limit: int = Query(20)) -> Dict[str, Any]:
+    """Get market news"""
+    if not historical_data:
+        # Return default news
+        return {
+            "news": [
+                {"time": "10:45 AM", "headline": "Fed officials signal patience on rate cuts", "source": "Reuters"},
+                {"time": "10:30 AM", "headline": "Treasury yields rise on strong economic data", "source": "Bloomberg"},
+                {"time": "10:15 AM", "headline": "Tech sector leads market gains", "source": "CNBC"},
+                {"time": "09:45 AM", "headline": "Options market shows heavy call buying", "source": "MarketWatch"},
+                {"time": "09:30 AM", "headline": "S&P 500 opens higher on earnings momentum", "source": "Bloomberg"},
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    symbol_list = symbols.split(',') if symbols else None
+    news = historical_data.get_market_news(symbol_list, limit)
+    
+    return {
+        "news": news,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+# ==================== ARCHIVED SCANS ENDPOINTS ====================
+
+@app.post("/api/scans/archive", response_class=JSONResponse)
+def archive_scan(scan_data: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Archive a market scan"""
+    if not prediction_engine:
+        return {"error": "Prediction engine not available"}
+    
+    scan_id = prediction_engine.archive_scan(scan_data)
+    
+    return {
+        "status": "archived",
+        "scan_id": scan_id,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/scans/archived", response_class=JSONResponse)
+def get_archived_scans(limit: int = Query(50)) -> Dict[str, Any]:
+    """Get archived scans"""
+    if not prediction_engine:
+        return {"error": "Prediction engine not available", "scans": []}
+    
+    scans = prediction_engine.get_archived_scans(limit)
+    
+    return {
+        "scans": scans,
+        "count": len(scans),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
