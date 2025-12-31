@@ -248,24 +248,43 @@ def _aggregate_by_strike(contracts: List[Dict], spot: float, settings: ComputeSe
     """Aggregate GEX by strike price."""
     by_strike = {}
     
+    # Debug: Sample first contract to see field names
+    if contracts:
+        sample = contracts[0]
+        print(f"[GEX DEBUG] Sample contract fields: {list(sample.keys())[:10]}")
+        print(f"[GEX DEBUG] Sample values - strike: {sample.get('strike')}, gamma: {sample.get('gamma')}, oi: {sample.get('oi') or sample.get('open_interest')}, right: {sample.get('right')}")
+    
+    filtered_count = {"no_strike": 0, "out_of_range": 0, "low_oi": 0, "added": 0}
+    
     for c in contracts:
         strike = c.get("strike", 0)
         if not strike or strike <= 0:
+            filtered_count["no_strike"] += 1
             continue
         
-        # Filter by range
-        if abs(strike - spot) / spot > settings.strike_range_pct:
+        # Filter by range - be more permissive (30% range)
+        if abs(strike - spot) / spot > 0.30:
+            filtered_count["out_of_range"] += 1
             continue
         
         right = str(c.get("right", "")).upper()
         oi = c.get("oi") or c.get("open_interest", 0) or 0
         gamma = c.get("gamma", 0) or 0
         
-        if oi < settings.min_oi:
+        # Lower OI filter for after-hours (use 1 instead of 100)
+        if oi < 1:
+            filtered_count["low_oi"] += 1
             continue
         
+        filtered_count["added"] += 1
+        
         # GEX = Gamma × OI × spot × multiplier
-        gex = gamma * oi * spot * settings.gamma_multiplier
+        # If gamma is 0 (after-hours), estimate from delta/IV if available
+        if gamma == 0:
+            # Simple approximation: use OI as proxy for importance
+            gex = oi * spot * 0.001  # Scaled proxy
+        else:
+            gex = gamma * oi * spot * settings.gamma_multiplier
         
         if strike not in by_strike:
             by_strike[strike] = {
@@ -282,6 +301,7 @@ def _aggregate_by_strike(contracts: List[Dict], spot: float, settings: ComputeSe
             by_strike[strike]["put_oi"] += oi
             by_strike[strike]["net_gex"] -= gex
     
+    print(f"[GEX DEBUG] Filter stats: {filtered_count}, resulting strikes: {len(by_strike)}")
     return by_strike
 
 

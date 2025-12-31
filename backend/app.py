@@ -72,8 +72,12 @@ alert_settings = AlertRuleSettings()
 store = SnapshotStore(max_per_key=500)
 
 theta: Optional[ThetaClient] = None
-if DATA_MODE in ("local", "local_direct", "direct"):
+# Always create ThetaClient - THETA_BASE_URL can point to ngrok for cloud deployments
+try:
     theta = ThetaClient(base_url=THETA_BASE_URL)
+    print(f"[App] ThetaClient initialized: {THETA_BASE_URL}")
+except Exception as e:
+    print(f"[App] Failed to initialize ThetaClient: {e}")
 
 app = FastAPI(title="NQ GOD Institutional Terminal", version="2.0")
 
@@ -140,20 +144,86 @@ def _require_theta() -> ThetaClient:
 @app.get("/api/snapshot", response_class=JSONResponse)
 def snapshot(
     symbol: str = Query(...),
-    bucket: str = Query("0DTE"),
+    bucket: str = Query("TOTAL"),
 ) -> Dict[str, Any]:
+    """Get GEX snapshot for a symbol. Uses ThetaData via ngrok."""
     symbol = symbol.upper()
     bucket = bucket.upper()
     
+    # Check cache first
     snap = store.latest(symbol, bucket)
-    if not snap:
-        if DATA_MODE in ("local", "local_direct", "direct"):
-            th = _require_theta()
-            snap = compute_gex_snapshot(th, symbol, bucket, compute_settings)
-            store.add_snapshot(symbol, bucket, snap["meta"]["ts"], snap)
-        else:
-            raise HTTPException(status_code=404, detail="No snapshot available.")
-    return snap
+    if snap:
+        return snap
+    
+    # Compute fresh GEX from ThetaData
+    if theta:
+        try:
+            snap = compute_gex_snapshot(theta, symbol, bucket, compute_settings)
+            if snap:
+                # Cache it for future requests
+                if snap.get("meta", {}).get("ts"):
+                    store.add_snapshot(symbol, bucket, snap["meta"]["ts"], snap)
+                return snap
+        except Exception as e:
+            print(f"[Snapshot] Error computing GEX for {symbol}: {e}")
+            raise HTTPException(status_code=500, detail=f"Error computing GEX: {str(e)}")
+    
+    raise HTTPException(status_code=503, detail="ThetaData connection not available. Ensure ngrok is running.")
+
+
+def _generate_sample_snapshot(symbol: str, bucket: str) -> Dict[str, Any]:
+    """Generate sample GEX snapshot data when real data unavailable"""
+    import random
+    
+    spot_prices = {"SPY": 591, "QQQ": 520, "SPX": 5905, "IWM": 225, "NVDA": 140, "AAPL": 255, "TSLA": 455}
+    spot = spot_prices.get(symbol, 500)
+    
+    base_strike = round(spot / 5) * 5
+    strikes = []
+    
+    for i in range(-15, 16):
+        strike = base_strike + i * 5
+        dist_from_spot = abs(strike - spot) / spot
+        
+        # Generate realistic GEX values
+        call_gex = max(0, 200e6 * random.uniform(0.3, 1.0) * (1 - dist_from_spot * 5))
+        put_gex = max(0, 150e6 * random.uniform(0.3, 1.0) * (1 - dist_from_spot * 5))
+        
+        strikes.append({
+            "strike": strike,
+            "call_gex": call_gex,
+            "put_gex": put_gex,
+            "net_gex": call_gex - put_gex,
+            "call_oi": int(random.uniform(10000, 80000)),
+            "put_oi": int(random.uniform(10000, 60000)),
+            "volume": int(random.uniform(5000, 50000))
+        })
+    
+    # Calculate key levels
+    max_call = max(strikes, key=lambda x: x["call_gex"])
+    max_put = max(strikes, key=lambda x: x["put_gex"])
+    
+    zero_gamma = spot + random.uniform(-5, 5)
+    
+    return {
+        "meta": {
+            "symbol": symbol,
+            "bucket": bucket,
+            "spot": spot,
+            "ts": datetime.now(timezone.utc).isoformat()
+        },
+        "strikes": strikes,
+        "summary": {
+            "call_wall": max_call["strike"],
+            "put_wall": max_put["strike"],
+            "zero_gamma": zero_gamma,
+            "g1": zero_gamma + 15,
+            "g2": zero_gamma - 10,
+            "dealer_cluster_low": spot - 15,
+            "dealer_cluster_high": spot + 10,
+            "net_gex": sum(s["net_gex"] for s in strikes)
+        }
+    }
 
 
 # S&P 500 Components
