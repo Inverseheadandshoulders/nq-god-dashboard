@@ -1679,6 +1679,88 @@ body {
     font-weight: 600;
 }
 
+/* ==================== UNUSUAL WHALES STYLE HEATMAP ==================== */
+.uw-heatmap-container {
+    padding: 16px;
+    background: #0d1117;
+    min-height: 700px;
+}
+
+.uw-heatmap-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.uw-heatmap-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.uw-heatmap-tabs {
+    display: flex;
+    gap: 8px;
+}
+
+.uw-tab {
+    padding: 8px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.uw-tab:hover {
+    border-color: var(--text-muted);
+    color: var(--text-primary);
+}
+
+.uw-tab.active {
+    background: var(--cyan);
+    border-color: var(--cyan);
+    color: #000;
+}
+
+.uw-heatmap-legend {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    padding: 16px 0;
+    margin-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.uw-heatmap-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.uw-heatmap-legend .color-box {
+    width: 16px;
+    height: 12px;
+    border-radius: 2px;
+}
+
+/* Plotly treemap customizations */
+#treemapChart .slice {
+    cursor: pointer !important;
+}
+
+#treemapChart text {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
 /* ==================== GEX PAGE (GeeksOfFinance Style) ==================== */
 .gex-page-header {
     display: flex;

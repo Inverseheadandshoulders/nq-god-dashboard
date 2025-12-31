@@ -2622,40 +2622,39 @@ const App = {
         Plotly.newPlot('volSurfacePlot', [trace], layout, { responsive: true, displayModeBar: false });
     },
 
-    // ==================== S&P 500 HEATMAP ====================
+    // ==================== S&P 500 HEATMAP (Unusual Whales Style) ====================
     renderHeatmap: async function () {
         const container = document.getElementById('sp500Heatmap');
         if (!container) return;
 
-        // Try to fetch real data from API first
-        let sectors = null;
-        let topStocks = [];
+        // Market cap weights for S&P 500 stocks (in billions, approximate)
+        const marketCaps = {
+            'AAPL': 3000, 'MSFT': 2800, 'NVDA': 1200, 'GOOGL': 1900, 'AMZN': 1800,
+            'META': 900, 'TSLA': 800, 'BRK.B': 800, 'UNH': 500, 'JNJ': 400,
+            'JPM': 550, 'V': 500, 'XOM': 450, 'MA': 400, 'PG': 380,
+            'HD': 350, 'CVX': 300, 'ABBV': 280, 'MRK': 275, 'LLY': 600,
+            'PEP': 230, 'KO': 260, 'AVGO': 400, 'COST': 300, 'TMO': 200,
+            'CSCO': 200, 'MCD': 200, 'WMT': 450, 'ACN': 200, 'ABT': 190,
+            'CRM': 250, 'ORCL': 300, 'AMD': 250, 'INTC': 150, 'QCOM': 180,
+            'BAC': 280, 'GS': 130, 'MS': 140, 'WFC': 180, 'C': 100,
+            'PFE': 160, 'NKE': 140, 'DIS': 170, 'NFLX': 250, 'ADBE': 230
+        };
 
+        // Fetch data from API
+        let stockData = [];
         try {
             const res = await fetch('/api/heatmap/sp500');
             if (res.ok) {
                 const apiData = await res.json();
                 if (apiData.data && apiData.data.length > 0) {
-                    // Transform API data to our format
-                    const sectorWeights = {
-                        'Technology': 28, 'Financial Services': 12, 'Healthcare': 13,
-                        'Consumer Cyclical': 11, 'Communication': 9, 'Industrials': 8,
-                        'Consumer Defensive': 6, 'Energy': 5
-                    };
-
-                    sectors = apiData.data.map(s => {
-                        const avgChange = s.stocks.reduce((sum, stock) => sum + (stock.change || 0), 0) / s.stocks.length;
-                        return {
-                            name: s.sector,
-                            change: avgChange,
-                            weight: sectorWeights[s.sector] || 5
-                        };
-                    });
-
-                    // Get top movers from all stocks
-                    apiData.data.forEach(s => {
-                        s.stocks.forEach(stock => {
-                            topStocks.push({ symbol: stock.ticker, change: stock.change, sector: s.sector });
+                    apiData.data.forEach(sector => {
+                        sector.stocks.forEach(stock => {
+                            stockData.push({
+                                symbol: stock.ticker,
+                                sector: sector.sector,
+                                change: stock.change || 0,
+                                mktcap: marketCaps[stock.ticker] || stock.mktcap / 1e9 || 50
+                            });
                         });
                     });
                 }
@@ -2664,112 +2663,160 @@ const App = {
             console.log('Heatmap API failed, using sample data');
         }
 
-        // Fallback to sample data if API failed
-        if (!sectors || sectors.length === 0) {
-            sectors = [
-                { name: 'Technology', change: 1.2, weight: 28 },
-                { name: 'Healthcare', change: -0.5, weight: 13 },
-                { name: 'Financials', change: 0.8, weight: 12 },
-                { name: 'Consumer Disc', change: 1.5, weight: 11 },
-                { name: 'Communication', change: 0.3, weight: 9 },
-                { name: 'Industrials', change: -0.2, weight: 8 },
-                { name: 'Consumer Staples', change: -0.8, weight: 6 },
-                { name: 'Energy', change: 2.1, weight: 5 },
-                { name: 'Utilities', change: -0.3, weight: 3 },
-                { name: 'Real Estate', change: -1.2, weight: 3 },
-                { name: 'Materials', change: 0.6, weight: 2 }
-            ];
-
-            topStocks = [
-                { symbol: 'AAPL', change: 1.5, sector: 'Technology' },
-                { symbol: 'MSFT', change: 0.8, sector: 'Technology' },
-                { symbol: 'NVDA', change: 3.2, sector: 'Technology' },
-                { symbol: 'GOOGL', change: 0.5, sector: 'Communication' },
-                { symbol: 'AMZN', change: 1.2, sector: 'Consumer Disc' },
-                { symbol: 'META', change: 1.8, sector: 'Communication' },
-                { symbol: 'TSLA', change: 2.5, sector: 'Consumer Disc' },
-                { symbol: 'JPM', change: 1.0, sector: 'Financials' },
-                { symbol: 'JNJ', change: -0.3, sector: 'Healthcare' },
-                { symbol: 'UNH', change: -0.8, sector: 'Healthcare' },
-                { symbol: 'XOM', change: 2.8, sector: 'Energy' },
-                { symbol: 'CVX', change: 1.9, sector: 'Energy' }
+        // Fallback sample data if API failed
+        if (stockData.length === 0) {
+            stockData = [
+                { symbol: 'AAPL', sector: 'Technology', change: 1.5, mktcap: 3000 },
+                { symbol: 'MSFT', sector: 'Technology', change: 0.8, mktcap: 2800 },
+                { symbol: 'NVDA', sector: 'Technology', change: 3.2, mktcap: 1200 },
+                { symbol: 'GOOGL', sector: 'Communication', change: 0.5, mktcap: 1900 },
+                { symbol: 'META', sector: 'Communication', change: 1.8, mktcap: 900 },
+                { symbol: 'AMZN', sector: 'Consumer Cyclical', change: 1.2, mktcap: 1800 },
+                { symbol: 'TSLA', sector: 'Consumer Cyclical', change: -2.5, mktcap: 800 },
+                { symbol: 'JPM', sector: 'Financial Services', change: 1.0, mktcap: 550 },
+                { symbol: 'BAC', sector: 'Financial Services', change: 0.6, mktcap: 280 },
+                { symbol: 'UNH', sector: 'Healthcare', change: -0.8, mktcap: 500 },
+                { symbol: 'JNJ', sector: 'Healthcare', change: -0.3, mktcap: 400 },
+                { symbol: 'LLY', sector: 'Healthcare', change: 2.1, mktcap: 600 },
+                { symbol: 'XOM', sector: 'Energy', change: 2.8, mktcap: 450 },
+                { symbol: 'CVX', sector: 'Energy', change: 1.9, mktcap: 300 },
+                { symbol: 'PG', sector: 'Consumer Defensive', change: -0.2, mktcap: 380 },
+                { symbol: 'KO', sector: 'Consumer Defensive', change: 0.1, mktcap: 260 },
+                { symbol: 'CAT', sector: 'Industrials', change: 1.3, mktcap: 180 },
+                { symbol: 'HON', sector: 'Industrials', change: 0.7, mktcap: 140 }
             ];
         }
 
-        var html = '<div class="heatmap-container">' +
-            '<div class="heatmap-header">S&P 500 Sector Performance</div>' +
-            '<div class="heatmap-grid">';
+        // Build treemap data structure
+        const ids = ['S&P 500'];
+        const labels = ['S&P 500'];
+        const parents = [''];
+        const values = [0];
+        const colors = [0];
+        const customdata = [{ symbol: '', change: 0 }];
 
-        // Store sector data for click navigation
-        var sectorStocks = {};
-        topStocks.forEach(function (s) {
-            if (!sectorStocks[s.sector]) sectorStocks[s.sector] = [];
-            sectorStocks[s.sector].push(s);
+        // Add sectors first
+        const sectorTotals = {};
+        stockData.forEach(s => {
+            if (!sectorTotals[s.sector]) {
+                sectorTotals[s.sector] = { mktcap: 0, change: 0, count: 0 };
+            }
+            sectorTotals[s.sector].mktcap += s.mktcap;
+            sectorTotals[s.sector].change += s.change;
+            sectorTotals[s.sector].count++;
         });
 
-        for (var i = 0; i < sectors.length; i++) {
-            var s = sectors[i];
-            var color = s.change > 1 ? '#26a69a' : s.change > 0 ? '#4db6ac' : s.change > -1 ? '#ef9a9a' : '#ef5350';
-            var textColor = Math.abs(s.change) > 0.5 ? '#fff' : '#ccc';
-            var stocksInSector = sectorStocks[s.name] || [];
-            var topStock = stocksInSector.length > 0 ? stocksInSector[0].symbol : '';
-
-            html += '<div class="heatmap-cell" data-sector="' + s.name + '" data-symbol="' + topStock + '" style="background:' + color + ';flex-basis:' + (s.weight * 3) + '%;cursor:pointer;" title="Click to view ' + s.name + ' stocks">' +
-                '<div class="cell-name" style="color:' + textColor + '">' + s.name + '</div>' +
-                '<div class="cell-change" style="color:' + textColor + '">' + (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%</div>' +
-                '</div>';
-        }
-        html += '</div>';
-
-        // Top movers
-        html += '<div class="heatmap-movers">' +
-            '<div class="movers-section">' +
-            '<div class="movers-title">Top Gainers</div>' +
-            topStocks.filter(function (s) { return s.change > 0; })
-                .sort(function (a, b) { return b.change - a.change; })
-                .slice(0, 5)
-                .map(function (s) {
-                    return '<div class="mover-item"><span class="mover-symbol">' + s.symbol + '</span><span class="mover-change positive">+' + s.change.toFixed(2) + '%</span></div>';
-                }).join('') +
-            '</div>' +
-            '<div class="movers-section">' +
-            '<div class="movers-title">Top Losers</div>' +
-            topStocks.filter(function (s) { return s.change < 0; })
-                .sort(function (a, b) { return a.change - b.change; })
-                .slice(0, 5)
-                .map(function (s) {
-                    return '<div class="mover-item"><span class="mover-symbol">' + s.symbol + '</span><span class="mover-change negative">' + s.change.toFixed(2) + '%</span></div>';
-                }).join('') +
-            '</div>' +
-            '</div></div>';
-
-        container.innerHTML = html;
-
-        // Add click handlers for sector cells
-        container.querySelectorAll('.heatmap-cell').forEach(function (cell) {
-            cell.addEventListener('click', function () {
-                var sector = this.getAttribute('data-sector');
-                var symbol = this.getAttribute('data-symbol');
-                if (symbol) {
-                    // Navigate to the top stock in this sector
-                    NQGODApp.state.symbol = symbol;
-                    NQGODApp.navigateTo('overview');
-                }
-            });
+        Object.keys(sectorTotals).forEach(sector => {
+            ids.push(sector);
+            labels.push(sector);
+            parents.push('S&P 500');
+            values.push(0);
+            const avgChange = sectorTotals[sector].change / sectorTotals[sector].count;
+            colors.push(avgChange);
+            customdata.push({ symbol: sector, change: avgChange });
         });
 
-        // Add click handlers for mover items
-        container.querySelectorAll('.mover-item').forEach(function (item) {
-            item.style.cursor = 'pointer';
-            item.addEventListener('click', function () {
-                var symbolEl = this.querySelector('.mover-symbol');
-                if (symbolEl) {
-                    NQGODApp.state.symbol = symbolEl.textContent;
-                    NQGODApp.navigateTo('overview');
+        // Add stocks under their sectors
+        stockData.forEach(s => {
+            ids.push(s.symbol);
+            labels.push(s.symbol);
+            parents.push(s.sector);
+            values.push(s.mktcap);
+            colors.push(s.change);
+            customdata.push({ symbol: s.symbol, change: s.change, sector: s.sector });
+        });
+
+        // Create HTML container
+        container.innerHTML = `
+            <div class="uw-heatmap-container">
+                <div class="uw-heatmap-header">
+                    <h2>S&P 500 Market Heatmap</h2>
+                    <div class="uw-heatmap-tabs">
+                        <button class="uw-tab active" data-view="price">Price Change</button>
+                        <button class="uw-tab" data-view="pcr">Put/Call Ratio</button>
+                    </div>
+                </div>
+                <div id="treemapChart" style="height: 600px;"></div>
+                <div class="uw-heatmap-legend">
+                    <span class="legend-item"><span class="color-box" style="background:#1e7d32"></span> +3%+</span>
+                    <span class="legend-item"><span class="color-box" style="background:#4caf50"></span> +1-3%</span>
+                    <span class="legend-item"><span class="color-box" style="background:#81c784"></span> +0-1%</span>
+                    <span class="legend-item"><span class="color-box" style="background:#424242"></span> ~0%</span>
+                    <span class="legend-item"><span class="color-box" style="background:#e57373"></span> -0-1%</span>
+                    <span class="legend-item"><span class="color-box" style="background:#f44336"></span> -1-3%</span>
+                    <span class="legend-item"><span class="color-box" style="background:#b71c1c"></span> -3%+</span>
+                </div>
+            </div>
+        `;
+
+        // Plotly treemap
+        const trace = {
+            type: 'treemap',
+            ids: ids,
+            labels: labels,
+            parents: parents,
+            values: values,
+            marker: {
+                colors: colors,
+                colorscale: [
+                    [0, '#b71c1c'],      // -5% deep red
+                    [0.2, '#f44336'],    // -3% red
+                    [0.35, '#e57373'],   // -1% light red
+                    [0.45, '#424242'],   // -0.2% gray
+                    [0.55, '#424242'],   // +0.2% gray
+                    [0.65, '#81c784'],   // +1% light green
+                    [0.8, '#4caf50'],    // +3% green
+                    [1, '#1e7d32']       // +5% deep green
+                ],
+                cmin: -5,
+                cmax: 5,
+                line: { width: 1, color: '#1a1a2e' }
+            },
+            textinfo: 'label+text',
+            text: colors.map((c, i) => i > 0 ? (c >= 0 ? '+' : '') + c.toFixed(2) + '%' : ''),
+            textfont: {
+                family: 'JetBrains Mono, monospace',
+                size: 12,
+                color: '#ffffff'
+            },
+            hovertemplate: '<b>%{label}</b><br>Change: %{text}<br>Market Cap: $%{value:.0f}B<extra></extra>',
+            branchvalues: 'total',
+            maxdepth: 2
+        };
+
+        const layout = {
+            paper_bgcolor: '#0d1117',
+            margin: { t: 10, l: 10, r: 10, b: 10 },
+            font: { color: '#ffffff', family: 'Inter, sans-serif' }
+        };
+
+        Plotly.newPlot('treemapChart', [trace], layout, {
+            responsive: true,
+            displayModeBar: false
+        });
+
+        // Click handler for navigation
+        document.getElementById('treemapChart').on('plotly_click', (data) => {
+            if (data.points && data.points[0]) {
+                const label = data.points[0].label;
+                // Only navigate if it's a stock ticker (not a sector)
+                if (label && !Object.keys(sectorTotals).includes(label) && label !== 'S&P 500') {
+                    this.state.symbol = label;
+                    this.navigateTo('overview');
                 }
+            }
+        });
+
+        // Tab switching
+        container.querySelectorAll('.uw-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                container.querySelectorAll('.uw-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                // TODO: Switch between price change and P/C ratio views
             });
         });
     },
+
 
     // ==================== HELPERS ====================
 
