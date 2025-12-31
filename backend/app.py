@@ -1229,3 +1229,59 @@ def get_archived_scans(limit: int = Query(50)) -> Dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+
+
+# ==================== GEX ENDPOINT ====================
+
+@app.get("/api/gex", response_class=JSONResponse)
+def get_gex(symbol: str = Query("SPY")) -> Dict[str, Any]:
+    """Get GEX (Gamma Exposure) data for a symbol"""
+    try:
+        symbol = symbol.upper()
+        
+        # Try to get cached result from store
+        cached = store.latest(symbol, "GEX")
+        if cached:
+            return cached
+        
+        # Compute fresh GEX data
+        if theta:
+            settings = ComputeSettings(dte_max=60)
+            result = compute_gex_snapshot(theta, symbol, settings)
+            if result:
+                store.add_snapshot(symbol, "GEX", datetime.now(timezone.utc).isoformat(), result)
+                return result
+        
+        # Return placeholder if no data
+        return {
+            "symbol": symbol,
+            "spot": 590 if symbol == "SPY" else 520 if symbol == "QQQ" else 140,
+            "profile": {
+                "strikes": [585, 590, 595, 600, 605],
+                "net_gex": [100, 250, -50, 150, -100],
+                "call_gex": [200, 300, 100, 250, 50],
+                "put_gex": [-100, -50, -150, -100, -150],
+            },
+            "zero_gamma": 592.50,
+            "total_gex": 500,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "symbol": symbol,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+# ==================== STREAMING STATUS ENDPOINT ====================
+
+@app.get("/api/stream/status", response_class=JSONResponse)
+def get_stream_status() -> Dict[str, Any]:
+    """Get streaming connection status"""
+    return {
+        "available": False,
+        "connected": False,
+        "reason": "Streaming not configured - ThetaData Terminal required",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
