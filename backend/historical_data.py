@@ -530,20 +530,153 @@ class HistoricalDataManager:
         return self._generate_market_news()
     
     def _generate_market_news(self) -> List[Dict]:
-        """Generate relevant market news headlines"""
+        """Fetch real news from RSS feeds, with fallback to generated news"""
+        # Try to fetch real news first
+        try:
+            news = self._fetch_rss_news()
+            if news:
+                # Cache the fetched news
+                self.cache_news(news)
+                return news
+        except Exception as e:
+            print(f"[News] Error fetching RSS: {e}")
+        
+        # Fallback to generated news
+        return self._get_fallback_news()
+    
+    def _fetch_rss_news(self) -> List[Dict]:
+        """Fetch news from multiple RSS feeds"""
+        import xml.etree.ElementTree as ET
+        
+        # Financial news RSS feeds (free, no API key needed)
+        feeds = [
+            ("https://www.cnbc.com/id/10001147/device/rss/rss.html", "CNBC"),  # CNBC Markets
+            ("https://feeds.marketwatch.com/marketwatch/topstories/", "MarketWatch"),
+            ("https://finance.yahoo.com/news/rssindex", "Yahoo Finance"),
+        ]
+        
+        all_news = []
+        now = datetime.now()
+        
+        for feed_url, source in feeds:
+            try:
+                response = requests.get(feed_url, timeout=5, headers={
+                    'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)'
+                })
+                
+                if response.status_code != 200:
+                    continue
+                
+                # Parse RSS/XML
+                root = ET.fromstring(response.content)
+                
+                # Find items (RSS format)
+                items = root.findall('.//item')
+                
+                for item in items[:5]:  # Limit per source
+                    title_elem = item.find('title')
+                    pub_date_elem = item.find('pubDate')
+                    
+                    if title_elem is not None:
+                        headline = title_elem.text.strip() if title_elem.text else ""
+                        
+                        # Parse publication date
+                        if pub_date_elem is not None and pub_date_elem.text:
+                            try:
+                                from email.utils import parsedate_to_datetime
+                                pub_dt = parsedate_to_datetime(pub_date_elem.text)
+                                time_str = pub_dt.strftime('%I:%M %p')
+                            except:
+                                time_str = now.strftime('%I:%M %p')
+                        else:
+                            time_str = now.strftime('%I:%M %p')
+                        
+                        # Simple sentiment analysis based on keywords
+                        sentiment = self._analyze_headline_sentiment(headline)
+                        
+                        # Detect related symbols
+                        symbol = self._detect_symbol(headline)
+                        
+                        all_news.append({
+                            'timestamp': now.strftime('%Y-%m-%d') + ' ' + time_str,
+                            'time': time_str,
+                            'symbol': symbol,
+                            'headline': headline[:200],  # Truncate if too long
+                            'source': source,
+                            'sentiment': sentiment
+                        })
+                        
+            except requests.exceptions.RequestException as e:
+                print(f"[News] Failed to fetch {source}: {e}")
+                continue
+            except ET.ParseError as e:
+                print(f"[News] Failed to parse {source} RSS: {e}")
+                continue
+        
+        # Sort by time and limit
+        if all_news:
+            print(f"[News] Fetched {len(all_news)} real news items")
+        
+        return all_news[:20]
+    
+    def _analyze_headline_sentiment(self, headline: str) -> float:
+        """Simple keyword-based sentiment analysis"""
+        headline_lower = headline.lower()
+        
+        positive_words = ['surge', 'jump', 'gain', 'rise', 'rally', 'beat', 'high', 
+                         'bullish', 'optimism', 'growth', 'profit', 'record', 'soar']
+        negative_words = ['drop', 'fall', 'decline', 'crash', 'fear', 'loss', 'warning',
+                         'bearish', 'concern', 'risk', 'cut', 'layoff', 'plunge', 'sink']
+        
+        score = 0
+        for word in positive_words:
+            if word in headline_lower:
+                score += 0.3
+        for word in negative_words:
+            if word in headline_lower:
+                score -= 0.3
+        
+        return max(-1, min(1, score))
+    
+    def _detect_symbol(self, headline: str) -> str:
+        """Detect stock symbols mentioned in headline"""
+        symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 
+                  'SPY', 'QQQ', 'AMD', 'NFLX', 'JPM', 'V', 'DIS', 'BA']
+        company_map = {
+            'apple': 'AAPL', 'microsoft': 'MSFT', 'google': 'GOOGL', 'alphabet': 'GOOGL',
+            'amazon': 'AMZN', 'nvidia': 'NVDA', 'meta': 'META', 'facebook': 'META',
+            'tesla': 'TSLA', 'amd': 'AMD', 'netflix': 'NFLX', 'jpmorgan': 'JPM',
+            'disney': 'DIS', 'boeing': 'BA', 's&p': 'SPY', 'nasdaq': 'QQQ'
+        }
+        
+        headline_lower = headline.lower()
+        
+        # Check company names
+        for company, symbol in company_map.items():
+            if company in headline_lower:
+                return symbol
+        
+        # Check direct ticker mentions
+        headline_upper = headline.upper()
+        for symbol in symbols:
+            if f' {symbol} ' in headline_upper or headline_upper.startswith(symbol + ' '):
+                return symbol
+        
+        return 'MARKET'
+    
+    def _get_fallback_news(self) -> List[Dict]:
+        """Return fallback news when RSS fetch fails"""
         now = datetime.now()
         
         news = [
-            {'time': '10:45 AM', 'headline': 'Fed officials signal patience on rate cuts amid sticky inflation', 'source': 'Reuters', 'sentiment': -0.2},
-            {'time': '10:30 AM', 'headline': 'Treasury yields rise as strong economic data dampens rate cut hopes', 'source': 'Bloomberg', 'sentiment': -0.1},
-            {'time': '10:15 AM', 'headline': 'NVDA announces next-gen AI accelerator with 2x performance gains', 'source': 'TechCrunch', 'sentiment': 0.8},
-            {'time': '09:45 AM', 'headline': 'Options market shows heavy call buying in tech sector', 'source': 'MarketWatch', 'sentiment': 0.5},
-            {'time': '09:30 AM', 'headline': 'S&P 500 opens higher on strong earnings momentum', 'source': 'CNBC', 'sentiment': 0.4},
-            {'time': '09:00 AM', 'headline': 'Pre-market: Futures flat ahead of key economic data', 'source': 'Bloomberg', 'sentiment': 0.0},
-            {'time': '08:30 AM', 'headline': 'Initial jobless claims fall to 210K, below estimates', 'source': 'Reuters', 'sentiment': 0.3},
-            {'time': '08:00 AM', 'headline': 'European markets mixed as ECB maintains hawkish stance', 'source': 'FT', 'sentiment': -0.1},
-            {'time': '07:30 AM', 'headline': 'Asian markets close higher on China stimulus hopes', 'source': 'Bloomberg', 'sentiment': 0.4},
-            {'time': '07:00 AM', 'headline': 'Oil prices rise 2% on Middle East supply concerns', 'source': 'Reuters', 'sentiment': 0.2},
+            {'time': '10:45 AM', 'headline': 'BREAKING: Major tech earnings beat expectations after market', 'source': 'Reuters', 'sentiment': 0.5},
+            {'time': '10:30 AM', 'headline': 'Fed minutes show continued hawkish stance on rates through Q1', 'source': 'Bloomberg', 'sentiment': -0.2},
+            {'time': '10:15 AM', 'headline': 'Treasury yields rise to 4.65% on strong jobs data', 'source': 'CNBC', 'sentiment': -0.1},
+            {'time': '09:45 AM', 'headline': 'NVDA announces new AI chip partnership with major cloud provider', 'source': 'TechCrunch', 'sentiment': 0.6},
+            {'time': '09:30 AM', 'headline': 'Market opens higher on positive earnings outlook', 'source': 'MarketWatch', 'sentiment': 0.4},
+            {'time': '09:00 AM', 'headline': 'Pre-market: Futures flat ahead of economic data release', 'source': 'Bloomberg', 'sentiment': 0.0},
+            {'time': '08:30 AM', 'headline': 'Initial jobless claims come in below expectations', 'source': 'Reuters', 'sentiment': 0.3},
+            {'time': '08:00 AM', 'headline': 'European markets mixed on ECB commentary', 'source': 'FT', 'sentiment': 0.0},
         ]
         
         return [{
@@ -551,7 +684,7 @@ class HistoricalDataManager:
             'symbol': 'MARKET',
             'headline': n['headline'],
             'source': n['source'],
-            'sentiment': n['sentiment']
+            'sentiment': n.get('sentiment', 0)
         } for n in news]
     
     def cache_news(self, news_items: List[Dict]):

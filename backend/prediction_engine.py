@@ -153,11 +153,17 @@ class PredictionEngine:
         """
         features = {}
         
-        # GEX features
+        # GEX features (handle None values)
         gex = market_data.get('gex', {})
-        features['gex_normalized'] = gex.get('net_gex', 0) / max(abs(gex.get('avg_gex', 1)), 1)
-        features['price_vs_call_wall'] = (gex.get('call_wall', 0) - gex.get('spot', 0)) / max(gex.get('spot', 1), 1) * 100
-        features['price_vs_put_wall'] = (gex.get('spot', 0) - gex.get('put_wall', 0)) / max(gex.get('spot', 1), 1) * 100
+        spot = gex.get('spot', 0) or market_data.get('price', 100)
+        call_wall = gex.get('call_wall', 0) or 0
+        put_wall = gex.get('put_wall', 0) or 0
+        net_gex = gex.get('net_gex', 0) or 0
+        avg_gex = gex.get('avg_gex', 1) or 1
+        
+        features['gex_normalized'] = net_gex / max(abs(avg_gex), 1)
+        features['price_vs_call_wall'] = ((call_wall - spot) / max(spot, 1) * 100) if call_wall else 0
+        features['price_vs_put_wall'] = ((spot - put_wall) / max(spot, 1) * 100) if put_wall else 0
         
         # Options flow features
         flow = market_data.get('flow', {})
