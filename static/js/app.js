@@ -53,12 +53,12 @@ const App = {
     init: async function () {
         console.log('NQ GOD v2 Initializing...');
 
-        // Check verification status first
-        const verified = await this.checkVerification();
-        if (!verified) {
-            this.showVerificationModal();
-            return; // Don't initialize until verified
-        }
+        // Check verification status first (DISABLED for now)
+        // const verified = await this.checkVerification();
+        // if (!verified) {
+        //     this.showVerificationModal();
+        //     return; // Don't initialize until verified
+        // }
 
         this.setupNavigation();
         this.setupTickerInput();
