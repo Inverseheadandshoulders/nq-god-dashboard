@@ -2578,12 +2578,21 @@ const App = {
             '<div class="heatmap-header">S&P 500 Sector Performance</div>' +
             '<div class="heatmap-grid">';
 
+        // Store sector data for click navigation
+        var sectorStocks = {};
+        topStocks.forEach(function (s) {
+            if (!sectorStocks[s.sector]) sectorStocks[s.sector] = [];
+            sectorStocks[s.sector].push(s);
+        });
+
         for (var i = 0; i < sectors.length; i++) {
             var s = sectors[i];
             var color = s.change > 1 ? '#26a69a' : s.change > 0 ? '#4db6ac' : s.change > -1 ? '#ef9a9a' : '#ef5350';
             var textColor = Math.abs(s.change) > 0.5 ? '#fff' : '#ccc';
+            var stocksInSector = sectorStocks[s.name] || [];
+            var topStock = stocksInSector.length > 0 ? stocksInSector[0].symbol : '';
 
-            html += '<div class="heatmap-cell" style="background:' + color + ';flex-basis:' + (s.weight * 3) + '%;">' +
+            html += '<div class="heatmap-cell" data-sector="' + s.name + '" data-symbol="' + topStock + '" style="background:' + color + ';flex-basis:' + (s.weight * 3) + '%;cursor:pointer;" title="Click to view ' + s.name + ' stocks">' +
                 '<div class="cell-name" style="color:' + textColor + '">' + s.name + '</div>' +
                 '<div class="cell-change" style="color:' + textColor + '">' + (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%</div>' +
                 '</div>';
@@ -2613,6 +2622,31 @@ const App = {
             '</div></div>';
 
         container.innerHTML = html;
+
+        // Add click handlers for sector cells
+        container.querySelectorAll('.heatmap-cell').forEach(function (cell) {
+            cell.addEventListener('click', function () {
+                var sector = this.getAttribute('data-sector');
+                var symbol = this.getAttribute('data-symbol');
+                if (symbol) {
+                    // Navigate to the top stock in this sector
+                    NQGODApp.state.symbol = symbol;
+                    NQGODApp.navigateTo('overview');
+                }
+            });
+        });
+
+        // Add click handlers for mover items
+        container.querySelectorAll('.mover-item').forEach(function (item) {
+            item.style.cursor = 'pointer';
+            item.addEventListener('click', function () {
+                var symbolEl = this.querySelector('.mover-symbol');
+                if (symbolEl) {
+                    NQGODApp.state.symbol = symbolEl.textContent;
+                    NQGODApp.navigateTo('overview');
+                }
+            });
+        });
     },
 
     // ==================== HELPERS ====================
