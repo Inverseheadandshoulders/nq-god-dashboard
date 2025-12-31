@@ -293,13 +293,19 @@ class ThetaClient:
         return all_rows
 
     def get_all_greeks(self, symbol: str, exp: int, right: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get greeks for all options at an expiration.
+        
+        First tries real-time snapshot, falls back to EOD historical data (for after-hours).
+        """
         all_rows = []
+        
+        # Try real-time snapshot first
         for root in self._root_candidates(symbol):
             try:
                 _, data = self._try_paths(["/v2/bulk_snapshot/option/all_greeks"], {"root": root, "exp": int(exp)})
                 resp = self._parse_response_list(data)
                 if not resp:
-                    print(f"[Theta] Greeks for {root} exp {exp}: no response")
+                    print(f"[Theta] Greeks snapshot for {root} exp {exp}: no response, trying EOD fallback")
                     continue
 
                 idx_gamma = self._fmt_index(data, "gamma")
@@ -338,6 +344,127 @@ class ThetaClient:
                     
                 print(f"[Theta] Greeks for {root} exp {exp}: {len(all_rows)} contracts")
             except Exception as e:
-                print(f"[Theta] Greeks error for {root} exp {exp}: {e}")
+                print(f"[Theta] Greeks snapshot error for {root} exp {exp}: {e}")
                 continue
+        
+        # If real-time failed, try EOD historical data (works after hours)
+        if not all_rows:
+            print(f"[Theta] Trying EOD fallback for {symbol} exp {exp}")
+            all_rows = self._get_greeks_from_eod(symbol, exp, right)
+            
         return all_rows
+    
+    def _get_greeks_from_eod(self, symbol: str, exp: int, right: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fallback: get option data from EOD historical endpoint (works after hours)."""
+        all_rows = []
+        today = _today_yyyymmdd()
+        oi_map = {}  # {(strike, right): oi}
+        
+        for root in self._root_candidates(symbol):
+            try:
+                # First get OI data
+                try:
+                    _, oi_data = self._try_paths(
+                        ["/v2/bulk_hist/option/open_interest"],
+                        {"root": root, "exp": int(exp), "start_date": today, "end_date": today}
+                    )
+                    oi_resp = self._parse_response_list(oi_data)
+                    
+                    if not oi_resp:
+                        yesterday = int((datetime.strptime(str(today), "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d"))
+                        _, oi_data = self._try_paths(
+                            ["/v2/bulk_hist/option/open_interest"],
+                            {"root": root, "exp": int(exp), "start_date": yesterday, "end_date": yesterday}
+                        )
+                        oi_resp = self._parse_response_list(oi_data)
+                    
+                    # Build OI map
+                    for row in (oi_resp or []):
+                        if not isinstance(row, dict): continue
+                        contract = row.get("contract", {})
+                        ticks = row.get("ticks", [])
+                        if ticks and isinstance(ticks[0], list) and len(ticks[0]) > 1:
+                            strike = int(contract.get("strike", 0)) / 1000.0
+                            rgt = str(contract.get("right", "")).upper()
+                            if rgt in ("C", "CALL"): rgt = "C"
+                            elif rgt in ("P", "PUT"): rgt = "P"
+                            oi = int(ticks[0][1]) if ticks[0][1] else 0
+                            oi_map[(strike, rgt)] = oi
+                    
+                    print(f"[Theta] Loaded OI for {root} exp {exp}: {len(oi_map)} contracts")
+                except Exception as e:
+                    print(f"[Theta] OI fetch failed for {root}: {e}")
+                
+                # Get EOD price data
+                _, data = self._try_paths(
+                    ["/v2/bulk_hist/option/eod"], 
+                    {"root": root, "exp": int(exp), "start_date": today, "end_date": today}
+                )
+                resp = self._parse_response_list(data)
+                
+                if not resp:
+                    yesterday = int((datetime.strptime(str(today), "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d"))
+                    _, data = self._try_paths(
+                        ["/v2/bulk_hist/option/eod"],
+                        {"root": root, "exp": int(exp), "start_date": yesterday, "end_date": yesterday}
+                    )
+                    resp = self._parse_response_list(data)
+                
+                if not resp:
+                    continue
+                
+                # Parse EOD format: [ms_of_day,ms_of_day2,open,high,low,close,volume,count,bid_size,bid_exchange,bid,bid_condition,ask_size,ask_exchange,ask,ask_condition,date]
+                for row in resp:
+                    if not isinstance(row, dict): continue
+                    contract = row.get("contract", {})
+                    ticks = row.get("ticks", [])
+                    if not ticks or not isinstance(ticks[0], list): continue
+                    
+                    try:
+                        strike = int(contract.get("strike", 0)) / 1000.0
+                        exp_i = int(contract.get("expiration") or exp)
+                        rgt = str(contract.get("right") or "").upper()
+                        if rgt in ("C", "CALL"): rgt = "C"
+                        elif rgt in ("P", "PUT"): rgt = "P"
+                        
+                        if right and rgt != right: continue
+                        
+                        tick = ticks[0]
+                        bid = float(tick[10]) if len(tick) > 10 and tick[10] else 0
+                        ask = float(tick[14]) if len(tick) > 14 and tick[14] else 0
+                        mid_price = (bid + ask) / 2 if bid > 0 and ask > 0 else 0
+                        
+                        # Get OI from map
+                        oi = oi_map.get((strike, rgt), 0)
+                        
+                        # Skip if no OI (not interesting for GEX)
+                        if oi < 10:
+                            continue
+                        
+                        # Estimate gamma - use simplified model based on OI distribution
+                        # Higher OI = more important strike for GEX
+                        gamma_est = 0.001 * (oi / 1000)  # Scale gamma by OI
+                        
+                        all_rows.append({
+                            "right": rgt, 
+                            "strike": strike, 
+                            "exp": exp_i,
+                            "gamma": gamma_est,
+                            "delta": 0.5 if rgt == "C" else -0.5,
+                            "iv": None,
+                            "underlying_price": None,
+                            "opt_price": mid_price,
+                            "open_interest": oi,
+                            "source": "eod"
+                        })
+                    except Exception as e:
+                        continue
+                
+                print(f"[Theta] EOD fallback for {root} exp {exp}: {len(all_rows)} contracts")
+                
+            except Exception as e:
+                print(f"[Theta] EOD fallback error for {root} exp {exp}: {e}")
+                continue
+        
+        return all_rows
+
